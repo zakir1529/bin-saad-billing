@@ -23,9 +23,10 @@ You need a Windows 10 or 11 PC with internet, once. Pick one way.
 3. Double-click `BUILD-INSTALLER.bat`. It downloads what it needs, runs the program's checks, and builds the installer. This takes a few minutes the first time.
 4. The installer appears in the `dist` folder, named like `Bin Saad Billing Setup 1.0.0.exe`.
 
-**B. In the cloud with GitHub (no Node.js needed on the PC)**
-1. Put the program folder in a new private repository on GitHub.
-2. Open the Actions tab and run "Build Windows installer". When it finishes, download the installer from the run's Artifacts.
+**B. In the cloud with GitHub (nothing to install on any PC)**
+1. Put the program folder in a new private repository on GitHub (a free account is enough).
+2. Open the Actions tab and run "Build Windows installer". When it finishes, download the files from the run's Artifacts.
+3. You get two files: `Bin Saad Billing Setup 1.0.0.exe` (the normal installer) and `Bin Saad Billing 1.0.0.exe` (a portable version that runs by double-clicking, with no installation and no administrator rights). If the PC blocks installers, try the portable one. Both keep data in the same place.
 
 To try the program without making an installer, double-click `TRY-WITHOUT-INSTALLING.bat`.
 
