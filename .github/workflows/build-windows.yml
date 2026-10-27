@@ -26,7 +26,7 @@ jobs:
           Get-Content build.log | Select-Object -Last 60
           if ($code -ne 0) {
             $i = 0
-            Get-Content build.log | Select-Object -Last 25 | ForEach-Object { $i++; Write-Host "::error title=build log $i::$($_ -replace '[\r\n%]',' ')" }
+            Get-Content build.log | Select-Object -Last 9 | ForEach-Object { $i++; Write-Host "::error title=build log $i::$($_ -replace '[\r\n%]',' ')" }
             exit $code
           }
         env:
