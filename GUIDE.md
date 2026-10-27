@@ -1,0 +1,99 @@
+# Bin Saad Billing: setup guide
+
+A desktop billing program for Bin Saad Fabrics. It installs on the shop's Windows PC, opens in its own window (no browser), keeps its data on that PC, and prints receipts on a USB thermal printer.
+
+## What it does
+
+- Tap a suit to add it to the bill. Tap again for quantity 2. Search by typing; Enter adds the suit if only one matches.
+- Discount in percent (5, 10, 15 or any number) or in rupees. Example: 10% on Rs. 4,000 prints `Discount (10%)  -400` and a total of Rs. 3,600.
+- Payment by Cash, JazzCash, Easypaisa or Bank (editable in Settings). Cash shows the change to return in large type.
+- Receipt on 80mm or 58mm paper with shop name, address, phone, items, discount, total, payment and change. Logo and WhatsApp QR code can be added later in Settings.
+- Bills list: search by bill number, customer name, phone, suit or date. Reprint (marked DUPLICATE) and owner-only cancel with a reason.
+- Sales for any day and any month, this month against last month, best sellers. Hidden behind an eye button with a slash. Click it, enter the owner password, and the figures show for 15 seconds, then hide again. Staff never see sales.
+- Owner and staff logins. Staff can bill and reprint but cannot change prices, cancel bills, see sales, or give a discount above the limit (15% by default, changeable).
+- Automatic backup copies (see Backups).
+
+## 1. Get the installer
+
+You need a Windows 10 or 11 PC with internet, once. Pick one way.
+
+**A. On the shop PC (simplest)**
+1. Install Node.js (the LTS version) from https://nodejs.org and restart the PC.
+2. Put the program folder on the PC (for example on the Desktop).
+3. Double-click `BUILD-INSTALLER.bat`. It downloads what it needs, runs the program's checks, and builds the installer. This takes a few minutes the first time.
+4. The installer appears in the `dist` folder, named like `Bin Saad Billing Setup 1.0.0.exe`.
+
+**B. In the cloud with GitHub (no Node.js needed on the PC)**
+1. Put the program folder in a new private repository on GitHub.
+2. Open the Actions tab and run "Build Windows installer". When it finishes, download the installer from the run's Artifacts.
+
+To try the program without making an installer, double-click `TRY-WITHOUT-INSTALLING.bat`.
+
+If Windows shows "Windows protected your PC" when you open the installer, click **More info**, then **Run anyway**. This happens once because the program is not digitally signed (signing costs money and is not needed for one shop).
+
+## 2. First start
+
+1. Install and open Bin Saad Billing from the desktop icon.
+2. Create the owner password (at least 4 characters). Write it down and keep it safe: there is no way to recover it.
+3. Go to **Settings** and fill in the shop name, address, phone and WhatsApp number. Press Save.
+
+## 3. Printer
+
+1. Plug in the USB thermal printer and install its driver (from the CD or the maker's website). Print the Windows test page to check it works.
+2. In Windows printer properties, set the paper to the roll size (80mm or 58mm).
+3. In the program: **Settings, Receipt printer**. Choose the paper width, and the printer (or leave "Windows default printer"). Press Save, then **Print a test receipt**.
+4. If nothing prints straight away: untick "Print straight away, without asking each time" and save. Windows will then show its print window, where you can pick the printer. Tell the developer what you see.
+5. **Save as PDF** on any bill is available if the printer is not working: the bill is still saved.
+
+## 4. Add the suits
+
+1. Go to **Price list, Paste a list**.
+2. Type or paste one suit per line, with its price:
+   ```
+   Navy Blue Suit, 4000
+   Black Suit 4500
+   White Suit, 3800, Plain
+   ```
+   The last part is an optional group (it becomes a tab on the billing screen). Pasting a name that already exists updates its price.
+3. Use **Add a suit** or **Edit** for single changes. A price change affects new bills only; old bills keep the price they were sold at. Switch a suit off instead of deleting it.
+
+## 5. Daily use
+
+1. Open the program. Log in.
+2. Tap suits, choose a discount if needed, choose the payment method, enter the amount received (or press **Exact**), and press **Save and print**.
+3. The saved box shows the change to return. Press Enter or **New bill** for the next customer.
+4. If the printer fails, the bill is already saved. Press **Try printing again**. A bill can never be saved twice by pressing the button twice.
+5. A wrong bill: open **Bills**, pick it, **Cancel this bill**, write the reason (owner only). It stays in the records, marked cancelled, and is not counted in sales.
+
+## 6. Backups
+
+- The program copies all data to a backup folder on this PC every day and whenever bills change.
+- **Also choose a USB drive:** Settings, Backup, Choose. A copy goes there every day (one file per day, the last 60 days are kept). If the drive is unplugged, a red "Backup problem" note shows at the top.
+- Leave the USB drive plugged in, and take a copy home now and then.
+
+**Restoring from a backup** (new PC or a broken data file):
+1. Close the program.
+2. Copy the newest `binsaad-DATE.json` from the USB drive.
+3. Put it in the program's data folder (shown at the bottom of Settings, usually `C:\Users\<name>\AppData\Roaming\Bin Saad Billing\data`) and rename it to `data.json`, replacing the old file.
+4. Open the program.
+
+## 7. Staff and passwords
+
+Settings, **People who can log in**: add staff (name, username, password), give a new password, or switch a person off. Staff see only New bill, Bills and Prices.
+
+## 8. What has and has not been tested
+
+Tested by the developer's tools (all passing):
+- 35 automatic checks of the money and billing rules: totals, percent and rupee discounts (including rounding), change, cash and wallet rules, double-press protection, bill numbers never repeating, cancel rules, owner-only actions, staff discount limit, search, monthly comparison, backups, damaged-file recovery, receipt contents.
+- 46 on-screen checks that click through the real screens in a browser: first-time set-up, pasting suits, tap-to-add billing, 10% discount example, change, saved box, printer-offline recovery, bills search, reprint marked duplicate, cancel, hidden sales and eye button, staff limits, settings.
+
+**Not yet tested (needs the real shop PC):**
+- Opening as a Windows program (the installer, desktop icon, window).
+- Printing on the real thermal printer: paper width, text size, and the paper cut. This is the first thing to check on day one. Tell the developer what the receipt looks like and it can be adjusted.
+
+## 9. Things to know
+
+- Money is in whole rupees only. Percent discounts are rounded to the nearest rupee (half rounds up).
+- Data lives on this one PC. Keep the USB backup going. There is no phone or remote view.
+- To update the program later, run a new installer over the old one. Data is kept.
+- Not included in this version (can be added): stock counting, udhaar (credit) accounts, returns and exchange, hold bill, day-closing cash check, expenses.

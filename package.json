@@ -1,0 +1,49 @@
+{
+  "name": "bin-saad-billing",
+  "productName": "Bin Saad Billing",
+  "version": "1.0.0",
+  "description": "Billing software for Bin Saad Fabrics",
+  "main": "src/main/main.js",
+  "private": true,
+  "author": "Bin Saad Fabrics",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/core.test.js",
+    "dist": "electron-builder --win nsis --x64",
+    "dist:zip": "electron-builder --win zip --x64"
+  },
+  "devDependencies": {
+    "electron": "^37.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "pk.binsaad.billing",
+    "productName": "Bin Saad Billing",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Bin Saad Billing"
+    }
+  }
+}
