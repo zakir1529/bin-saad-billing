@@ -43,7 +43,7 @@
   }
 
   const newBill = () => ({
-    uid: uuid(), lines: [], discType: 'pct', discVal: '',
+    uid: uuid(), lines: [], discType: 'pct', discVal: '', credit: false,
     method: (S.settings && S.settings.paymentMethods[0]) || 'Cash', received: '', name: '', phone: '',
   });
 
@@ -52,6 +52,8 @@
     view: 'billing', search: '', group: 'All', bill: null, saving: false, done: null,
     bills: { text: '', from: '', to: '', state: '', list: null, sel: null, preview: null },
     prices: { q: '', all: [] },
+    udhaar: { q: '', list: null, sel: null, detail: null, pay: null, busy: false },
+    profit: { month: monthKey(), data: null },
     sales: { day: todayKey(), month: monthKey(), day_data: null, month_data: null },
     reveal: { on: false, today: null, timer: null },
     form: null, newUser: { name: '', username: '', password: '' }, pw: { old: '', a: '', b: '' },
@@ -120,6 +122,15 @@
     if (S.user.role !== 'owner' && out.t.discount * 100 > out.t.subtotal * S.settings.discountLimitPct) {
       out.hint = `A discount above ${S.settings.discountLimitPct}% needs the owner.`; return out;
     }
+    if (b.credit) {
+      if (!b.name.trim()) { out.hint = 'Udhaar needs the customer name.'; return out; }
+      if (b.phone.replace(/\D/g, '').length < 7) { out.hint = 'Udhaar needs the customer phone number.'; return out; }
+      out.paid = b.received === '' ? 0 : Number(b.received);
+      if (out.paid >= out.t.total) { out.hint = 'Paid now must be less than the total. For a full payment choose Paid in full.'; return out; }
+      out.due = out.t.total - out.paid;
+      out.ok = true;
+      return out;
+    }
     if (isCash(b.method)) {
       if (b.received === '') { out.hint = 'Enter the amount received.'; return out; }
       out.rec = Number(b.received);
@@ -153,7 +164,8 @@
         lines: b.lines.map((l) => ({ suitId: l.suitId, qty: l.qty })),
         discount: { type: b.discType, value: b.discVal === '' ? 0 : Number(b.discVal) },
         method: b.method,
-        received: isCash(b.method) ? Number(b.received) : '',
+        credit: !!b.credit,
+        received: b.credit ? (b.received === '' ? '' : Number(b.received)) : (isCash(b.method) ? Number(b.received) : ''),
         customerName: b.name,
         customerPhone: b.phone,
       });
@@ -189,12 +201,14 @@
     S.reveal = { on: false, today: null, timer: null };
     S.sales.day_data = null;
     S.sales.month_data = null;
+    S.profit.data = null;
     render();
   }
   async function doReveal() {
     S.reveal.today = await call('dailyReport', todayKey());
     S.reveal.on = true;
     if (S.view === 'sales') await loadSales();
+    if (S.view === 'profit') await loadProfit();
     clearTimeout(S.reveal.timer);
     S.reveal.timer = setTimeout(hideReveal, REVEAL_MS);
     render();
@@ -203,6 +217,16 @@
     if (S.reveal.on) return hideReveal();
     if (S.settings.revealNeedsPassword) { S.modal = { type: 'password', error: '' }; render(); return; }
     await doReveal();
+  }
+  async function loadProfit() {
+    S.profit.data = await call('profitReport', S.profit.month || monthKey());
+  }
+  async function loadUdhaar() {
+    const U = S.udhaar;
+    U.list = await call('listUdhaar');
+    if (U.sel) {
+      try { U.detail = await call('udhaarCustomer', U.sel); } catch (e) { U.sel = null; U.detail = null; U.pay = null; }
+    }
   }
   async function loadSales() {
     S.sales.day_data = await call('dailyReport', S.sales.day || todayKey());
@@ -221,6 +245,8 @@
       if (view === 'bills') await loadBills();
       if (view === 'prices') await reloadSuits();
       if (view === 'sales' && S.reveal.on) await loadSales();
+      if (view === 'profit' && S.reveal.on) await loadProfit();
+      if (view === 'udhaar') await loadUdhaar();
       if (view === 'settings') {
         S.settings = await call('getSettings');
         S.form = { ...S.settings, paymentMethodsText: S.settings.paymentMethods.join(', ') };
@@ -274,12 +300,12 @@
       </div></div></div>`;
   }
 
-  const TITLES = { billing: 'New bill', bills: 'Bills', prices: 'Price list', sales: 'Sales', settings: 'Settings' };
+  const TITLES = { billing: 'New bill', bills: 'Bills', prices: 'Price list', udhaar: 'Udhaar', profit: 'Profit', sales: 'Sales', settings: 'Settings' };
 
   function shell(content) {
     const owner = S.user.role === 'owner';
     const items = [['billing', 'New bill'], ['bills', 'Bills'], ['prices', owner ? 'Price list' : 'Prices']];
-    if (owner) items.push(['sales', 'Sales'], ['settings', 'Settings']);
+    if (owner) items.push(['udhaar', 'Udhaar'], ['profit', 'Profit'], ['sales', 'Sales'], ['settings', 'Settings']);
     const backupWarn = S.info && S.info.backupFolderSet && S.info.lastBackup && S.info.lastBackup.ok === false;
     return `<div class="shell">
       <nav class="nav">
@@ -354,13 +380,17 @@
             ${t && t.discount ? `<div class="sum"><span class="muted">Discount ${t.discountType === 'pct' ? '(' + Number(t.discountValue) + '%)' : ''}</span><span class="num">-${money(t.discount)}</span></div>` : ''}
             <div class="sum total"><span>Total</span><span class="num">${t ? money(t.total) : 'Rs. 0'}</span></div>
           </div>
+          <div class="seg"><button data-act="credit" data-v="" class="${b.credit ? '' : 'on'}">Paid in full</button><button data-act="credit" data-v="1" class="${b.credit ? 'on' : ''}">Udhaar</button></div>
           <div class="chips">${methods}</div>
-          ${isCash(b.method) ? `<div class="row"><input id="received" type="text" inputmode="numeric" placeholder="Amount received" data-bind="bill.received" data-kind="digits" data-rerender="1" data-enter="saveEnter" value="${esc(b.received)}" aria-label="Amount received">
+          ${b.credit
+            ? `<div class="row"><input id="received" type="text" inputmode="numeric" placeholder="Paid now (leave empty if nothing)" data-bind="bill.received" data-kind="digits" data-rerender="1" data-enter="saveEnter" value="${esc(b.received)}" aria-label="Paid now"></div>
+              ${c.due !== undefined ? `<div class="change due"><span>Left to pay (udhaar)</span><span class="num">${money(c.due)}</span></div>` : ''}`
+            : isCash(b.method) ? `<div class="row"><input id="received" type="text" inputmode="numeric" placeholder="Amount received" data-bind="bill.received" data-kind="digits" data-rerender="1" data-enter="saveEnter" value="${esc(b.received)}" aria-label="Amount received">
               <button class="btn" data-act="exact" ${t ? '' : 'disabled'}>Exact</button></div>
             ${c.rec !== null && c.ok ? `<div class="change"><span>Change to return</span><span class="num">${money(c.change)}</span></div>` : ''}`
             : `<div class="muted small">${esc(b.method)}: the amount received equals the total.</div>`}
-          <div class="row"><input type="text" id="cname" placeholder="Customer (optional)" data-bind="bill.name" value="${esc(b.name)}" aria-label="Customer name">
-            <input type="text" id="cphone" placeholder="Phone (optional)" data-bind="bill.phone" value="${esc(b.phone)}" aria-label="Customer phone"></div>
+          <div class="row"><input type="text" id="cname" placeholder="${b.credit ? 'Customer name (needed)' : 'Customer (optional)'}" data-bind="bill.name" value="${esc(b.name)}" aria-label="Customer name">
+            <input type="text" id="cphone" placeholder="${b.credit ? 'Phone (needed)' : 'Phone (optional)'}" data-bind="bill.phone" value="${esc(b.phone)}" aria-label="Customer phone"></div>
         </div>
       </div>
       <div class="actions">
@@ -377,7 +407,7 @@
       <td class="num"><b>${pad4(b.no)}</b></td><td class="num">${when(b.createdAt)}</td>
       <td>${esc(b.customerName || '')} <span class="muted small">${esc(b.customerPhone || '')}</span></td>
       <td class="right num"><b>${money(b.total)}</b></td><td>${esc(b.method)}</td>
-      <td>${b.status === 'cancelled' ? '<span class="pill bad">Cancelled</span>' : ''}</td></tr>`).join('');
+      <td>${b.status === 'cancelled' ? '<span class="pill bad">Cancelled</span>' : ''}${b.status !== 'cancelled' && b.due > 0 ? '<span class="pill off">Udhaar</span>' : ''}</td></tr>`).join('');
     const sel = f.sel && (f.list || []).find((b) => b.id === f.sel);
     return `<div class="split">
       <div>
@@ -406,7 +436,10 @@
         <div class="sum"><span class="muted">Subtotal</span><span class="num">${money(b.subtotal)}</span></div>
         ${b.discount ? `<div class="sum"><span class="muted">Discount ${b.discountType === 'pct' ? '(' + Number(b.discountValue) + '%)' : ''}</span><span class="num">-${money(b.discount)}</span></div>` : ''}
         <div class="sum" style="font-size:18px;font-weight:700"><span>Total</span><span class="num">${money(b.total)}</span></div>
-        <div class="sum muted"><span>Paid by ${esc(b.method)}</span><span class="num">${isCash(b.method) ? 'Received ' + money(b.received) + ', change ' + money(b.change) : ''}</span></div>
+        ${b.due > 0
+          ? `<div class="sum muted"><span>Udhaar</span><span class="num">Paid ${money(b.paid)}, owes ${money(b.due)}</span></div>`
+          : `<div class="sum muted"><span>Paid by ${esc(b.method)}</span><span class="num">${isCash(b.method) ? 'Received ' + money(b.received) + ', change ' + money(b.change) : ''}</span></div>`}
+        ${owner && b.status === 'paid' && 'profit' in b ? `<div class="sum muted"><span>Profit on this bill</span><span class="num">${b.profit === null ? 'cost not set' : shown(b.profit)}</span></div>` : ''}
         ${b.status === 'cancelled' ? `<div class="hint" style="margin-top:8px">Cancelled by ${esc(b.cancelledBy)}: ${esc(b.cancelReason)}</div>` : ''}
       </div>
       <div class="row wrap" style="margin-top:12px">
@@ -425,15 +458,105 @@
     const all = owner ? S.prices.all : S.suits;
     const q = S.prices.q.trim().toLowerCase();
     const list = all.filter((s) => !q || s.name.toLowerCase().includes(q) || (s.group || '').toLowerCase().includes(q));
-    const rows = list.map((s) => `<tr><td><b>${esc(s.name)}</b></td><td class="muted">${esc(s.group || '')}</td><td class="right num">${money(s.price)}</td>
+    const noCost = '<span class="muted small">not set</span>';
+    const rows = list.map((s) => {
+      const has = s.cost !== null && s.cost !== undefined;
+      return `<tr><td><b>${esc(s.name)}</b></td><td class="muted">${esc(s.group || '')}</td><td class="right num">${money(s.price)}</td>
+      ${owner ? `<td class="right num">${has ? shown(s.cost) : noCost}</td><td class="right num">${has ? shown(s.price - s.cost) : noCost}</td>` : ''}
       <td>${s.active ? '<span class="pill ok">On</span>' : '<span class="pill off">Off</span>'}</td>
-      <td class="right">${owner ? `<button class="btn small" data-act="editSuit" data-id="${s.id}">Edit</button>` : ''}</td></tr>`).join('');
+      <td class="right">${owner ? `<button class="btn small" data-act="editSuit" data-id="${s.id}">Edit</button>` : ''}</td></tr>`;
+    }).join('');
     return `<div class="card row wrap" style="margin-bottom:12px">
         <div class="field-wrap" style="min-width:240px"><label class="field" for="pq">Search the list</label><input id="pq" type="text" data-bind="prices.q" data-rerender="1" value="${esc(S.prices.q)}" placeholder="Suit name or group"></div>
-        ${owner ? '<div style="align-self:flex-end" class="row"><button class="btn primary" data-act="addSuit">Add a suit</button><button class="btn" data-act="pasteList">Paste a list</button></div>' : '<div class="muted small" style="align-self:flex-end">Only the owner can change prices.</div>'}
+        ${owner ? '<div style="align-self:flex-end" class="row"><button class="btn primary" data-act="addSuit">Add a suit</button><button class="btn" data-act="pasteList">Paste a list</button>' + eyeBtn() + '</div>' : '<div class="muted small" style="align-self:flex-end">Only the owner can change prices.</div>'}
       </div>
-      <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Suit</th><th>Group</th><th class="right">Price</th><th>Status</th><th></th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="5" class="empty">No suits yet.</td></tr>'}</tbody></table></div>`;
+      <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Suit</th><th>Group</th><th class="right">Price</th>${owner ? '<th class="right">Cost</th><th class="right">Profit each</th>' : ''}<th>Status</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="${owner ? 7 : 5}" class="empty">No suits yet.</td></tr>`}</tbody></table></div>
+      ${owner ? '<div class="muted small" style="margin-top:8px">Cost and profit stay hidden until you click the eye. Profit each = price minus cost, before any discount.</div>' : ''}`;
+  }
+
+  // ----- udhaar (owner): who owes money, and money received back -----
+  function viewUdhaar() {
+    const U = S.udhaar;
+    const q = U.q.trim().toLowerCase();
+    const qd = q.replace(/\D/g, '');
+    const all = U.list ? U.list.customers : [];
+    const list = all.filter((c) => !q || c.name.toLowerCase().includes(q) || (qd && c.phone.replace(/\D/g, '').includes(qd)));
+    const rows = list.map((c) => `<tr class="click ${U.sel === c.key ? 'sel' : ''}" data-act="pickUdhaar" data-key="${esc(c.key)}">
+      <td><b>${esc(c.name)}</b><div class="muted small">${esc(c.phone)}</div></td><td class="num">${c.lastAt ? when(c.lastAt) : ''}</td>
+      <td class="right num"><b>${money(c.balance)}</b></td></tr>`).join('');
+    const d = U.detail;
+    let detail = '<div class="card empty">Pick a customer to see their bills and to record money they bring back.</div>';
+    if (d) {
+      const p = U.pay || { amount: '', method: S.settings.paymentMethods[0], note: '' };
+      const methods = S.settings.paymentMethods.map((m) => `<button class="chip ${p.method === m ? 'on' : ''}" data-act="payMethod" data-v="${esc(m)}">${esc(m)}</button>`).join('');
+      detail = `<div class="card">
+        <div class="row between"><div><h2>${esc(d.name)}</h2><div class="muted small">${esc(d.phone)}</div></div>
+          <div class="right"><div class="muted small">Owes</div><div style="font-size:24px;font-weight:700" class="num">${money(d.balance)}</div></div></div>
+        <div class="stack" style="margin-top:12px">
+          <label class="field" for="u-amt" style="margin:0">Money received now</label>
+          <div class="row"><input id="u-amt" type="text" inputmode="numeric" data-bind="udhaar.pay.amount" data-kind="digits" data-rerender="1" data-enter="receiveUdhaar" value="${esc(p.amount)}" placeholder="Amount (Rs.)" aria-label="Amount received">
+            <button class="btn" data-act="fullUdhaar">Full ${money(d.balance)}</button></div>
+          <div class="chips">${methods}</div>
+          <input id="u-note" type="text" data-bind="udhaar.pay.note" placeholder="Note (optional)" value="${esc(p.note)}" aria-label="Note">
+          <button class="btn primary" data-act="receiveUdhaar" ${U.busy ? 'disabled' : ''}>${U.busy ? 'Saving...' : 'Receive money'}</button>
+        </div>
+        <h2 style="margin:16px 0 6px">Bills with udhaar</h2>
+        <table><thead><tr><th>No.</th><th>Date</th><th class="right">Total</th><th class="right">Paid</th><th class="right">Left</th></tr></thead><tbody>
+          ${d.billList.map((b) => `<tr><td class="num">${pad4(b.no)}</td><td class="num" style="white-space:nowrap">${when(b.createdAt).split(' ')[0]}</td><td class="right num">${money(b.total)}</td><td class="right num">${money(b.paid)}</td><td class="right num"><b>${money(b.due)}</b></td></tr>`).join('')}</tbody></table>
+        <h2 style="margin:16px 0 6px">Money received back</h2>
+        ${d.payments.length ? `<table><tbody>${d.payments.slice().reverse().map((x) => `<tr><td class="num">${when(x.at)}</td><td>${esc(x.method)}${x.note ? ' <span class="muted small">' + esc(x.note) + '</span>' : ''}</td><td class="right num"><b>${money(x.amount)}</b></td></tr>`).join('')}</tbody></table>` : '<div class="muted small">Nothing received back yet.</div>'}
+      </div>`;
+    }
+    return `<div class="split">
+      <div>
+        <div class="stats" style="margin-bottom:12px">
+          <div class="stat"><div class="k">Total udhaar to collect</div><div class="v num">${U.list ? money(U.list.total) : '-'}</div></div>
+          <div class="stat"><div class="k">Customers who owe</div><div class="v num">${U.list ? U.list.customers.length : '-'}</div></div>
+        </div>
+        <div class="card" style="margin-bottom:12px"><label class="field" for="uq">Find a customer by name or phone</label><input id="uq" type="text" data-bind="udhaar.q" data-rerender="1" value="${esc(U.q)}" placeholder="Name or phone"></div>
+        <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Customer</th><th>Last activity</th><th class="right">Owes</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="3" class="empty">${all.length ? 'No customer matches.' : 'Nobody owes anything.'}</td></tr>`}</tbody></table></div>
+        <div class="muted small" style="margin-top:8px">Udhaar is never printed on the customer's receipt. To start one, choose Udhaar on the New bill screen.</div>
+      </div>
+      <div>${detail}</div>
+    </div>`;
+  }
+
+  // ----- profit (owner, hidden until the eye is clicked) -----
+  function viewProfit() {
+    const on = S.reveal.on;
+    const p = S.profit.data;
+    const v = (n) => (on && p ? money(n) : DOTS);
+    let diff = '';
+    if (on && p) {
+      const delta = p.profit - p.prev.profit;
+      diff = p.prev.known ? `${delta >= 0 ? '+' : '-'}${money(Math.abs(delta))} compared with ${esc(p.prev.ym)}` : '';
+    }
+    const margin = on && p && p.sales > 0 ? Math.round((p.profit * 100) / p.sales) + '%' : on && p ? '-' : DOTS;
+    const warn = on && p && p.unknown > 0
+      ? `<div class="card" style="margin-top:12px;background:var(--warn-soft)"><b>${p.unknown} bill${p.unknown === 1 ? ' is' : 's are'} left out of the profit,</b> because a suit on ${p.unknown === 1 ? 'it' : 'them'} has no cost price.
+          ${p.missingCost.length ? '<div class="small" style="margin-top:4px">Add a cost for: ' + p.missingCost.map(esc).join(', ') + '. Then new bills will count.</div>' : ''}</div>`
+      : (on && p && p.missingCost.length ? `<div class="muted small" style="margin-top:8px">Suits with no cost price yet: ${p.missingCost.map(esc).join(', ')}.</div>` : '');
+    return `<div class="card row between" style="margin-bottom:12px">
+        <div class="muted">${on ? 'Figures are visible for a few seconds, then hide again.' : 'Profit is hidden. Click the eye to show it.'}</div>${eyeBtn()}</div>
+      <div class="row wrap" style="margin-bottom:10px"><h2>One month</h2>
+        <input type="month" id="pmonth" data-bind="profit.month" data-profit="1" value="${esc(S.profit.month)}" style="width:170px" aria-label="Pick a month"></div>
+      <div class="stats">
+        <div class="stat"><div class="k">Profit</div><div class="v num">${v(p ? p.profit : 0)}</div><div class="muted small" style="margin-top:4px">${diff}</div></div>
+        <div class="stat"><div class="k">Sales counted</div><div class="v num">${v(p ? p.sales : 0)}</div></div>
+        <div class="stat"><div class="k">Cost of the suits</div><div class="v num">${v(p ? p.cost : 0)}</div></div>
+        <div class="stat"><div class="k">Discounts given</div><div class="v num">${v(p ? p.discounts : 0)}</div></div>
+        <div class="stat"><div class="k">Margin (profit out of sales)</div><div class="v num">${margin}</div></div>
+      </div>
+      ${warn}
+      ${on && p ? `<div class="split" style="margin-top:12px">
+        <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Day</th><th class="right">Sales</th><th class="right">Cost</th><th class="right">Profit</th></tr></thead><tbody>
+          ${p.byDay.map((x) => `<tr><td>${dayLabel(x.dateKey)}</td><td class="right num">${money(x.sales)}</td><td class="right num">${money(x.cost)}</td><td class="right num"><b>${money(x.profit)}</b></td></tr>`).join('') || '<tr><td colspan="4" class="empty">No sales this month.</td></tr>'}</tbody></table></div>
+        <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Suit</th><th class="right">Sold</th><th class="right">Profit*</th></tr></thead><tbody>
+          ${p.bySuit.map((x) => `<tr><td>${esc(x.name)}</td><td class="right num">${x.qty}</td><td class="right num">${money(x.profit)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">Nothing sold yet.</td></tr>'}</tbody></table></div>
+      </div>
+      <div class="muted small" style="margin-top:8px">Profit = what the customer paid after discount, minus the cost of the suits. Udhaar bills count on the day the bill is made. *Suit profit is before discounts.</div>` : ''}`;
   }
 
   // ----- sales (owner, hidden until the eye is clicked) -----
@@ -545,7 +668,8 @@
       return `<div class="overlay"><div class="dialog" role="dialog" aria-label="Bill saved">
         <h2>Bill ${pad4(b.no)} saved</h2><div class="stack">
           <div class="sum total"><span>Total</span><span class="num">${money(b.total)}</span></div>
-          ${isCash(b.method) ? `<div class="muted small right">Received ${money(b.received)}</div><div class="big-change num">Change: ${money(b.change)}</div>` : `<div class="muted">Paid by ${esc(b.method)}</div>`}
+          ${b.due > 0 ? `<div class="muted small right">${b.paid > 0 ? 'Paid now ' + money(b.paid) + ' (' + esc(b.method) + ')' : 'Nothing paid now'}</div><div class="big-change due num">Udhaar: ${money(b.due)}</div><div class="muted small right">${esc(b.customerName)} ${esc(b.customerPhone)}</div>`
+            : isCash(b.method) ? `<div class="muted small right">Received ${money(b.received)}</div><div class="big-change num">Change: ${money(b.change)}</div>` : `<div class="muted">Paid by ${esc(b.method)}</div>`}
           <div>${status}</div>
           <div class="row"><button class="btn" data-act="printAgain" data-id="${b.id}" ${d.print === 'printing' ? 'disabled' : ''}>${d.print === 'failed' ? 'Try printing again' : 'Print again'}</button>
             <button class="btn primary grow" id="newbill" data-act="newbill" data-autofocus="1">New bill</button></div></div></div></div>`;
@@ -562,16 +686,17 @@
       const groups = [...new Set(S.prices.all.map((s) => s.group).filter(Boolean))];
       return `<div class="overlay"><div class="dialog"><h2>${m.id ? 'Edit suit' : 'Add a suit'}</h2><div class="stack">
         <div><label class="field" for="m-name">Suit name (no company name needed)</label><input id="m-name" type="text" data-bind="modal.name" data-enter="modalOk" data-autofocus="1" value="${esc(m.name)}"></div>
-        <div class="row"><div class="field-wrap"><label class="field" for="m-price">Price (Rs.)</label><input id="m-price" type="text" inputmode="numeric" data-bind="modal.price" data-kind="digits" data-enter="modalOk" value="${esc(m.price)}"></div>
-          <div class="field-wrap"><label class="field" for="m-group">Group (optional)</label><input id="m-group" list="groups" type="text" data-bind="modal.group" data-enter="modalOk" value="${esc(m.group)}"><datalist id="groups">${groups.map((g) => `<option value="${esc(g)}">`).join('')}</datalist></div></div>
+        <div class="row"><div class="field-wrap"><label class="field" for="m-price">Selling price (Rs.)</label><input id="m-price" type="text" inputmode="numeric" data-bind="modal.price" data-kind="digits" data-enter="modalOk" value="${esc(m.price)}"></div>
+          <div class="field-wrap"><label class="field" for="m-cost">Cost price (Rs.), for profit</label><input id="m-cost" type="text" inputmode="numeric" data-bind="modal.cost" data-kind="digits" data-enter="modalOk" value="${esc(m.cost)}" placeholder="Optional"></div></div>
+        <div class="row"><div class="field-wrap"><label class="field" for="m-group">Group (optional)</label><input id="m-group" list="groups" type="text" data-bind="modal.group" data-enter="modalOk" value="${esc(m.group)}"><datalist id="groups">${groups.map((g) => `<option value="${esc(g)}">`).join('')}</datalist></div></div>
         ${m.id ? `<label class="row"><input type="checkbox" data-bind="modal.active" ${m.active ? 'checked' : ''}> Show this suit when billing</label>` : ''}
-        <div class="muted small">Changing a price affects new bills only. Printed bills keep the price they were sold at.</div>
+        <div class="muted small">Changing a price or cost affects new bills only. Old bills keep the price and cost they were sold at. Without a cost price, profit for that suit stays unknown.</div>
         <div class="err">${esc(m.error)}</div>
         <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Save</button></div></div></div></div>`;
     }
     if (m.type === 'paste') {
       return `<div class="overlay"><div class="dialog wide"><h2>Paste a list of suits</h2><div class="stack">
-        <div class="muted small">One suit on each line, with its price. For example:<br><b>Navy Blue Suit, 4000</b><br><b>Black Suit 4500</b><br>A group can be added at the end: <b>White Suit, 3800, Plain</b>. A suit already in the list gets its price updated.</div>
+        <div class="muted small">One suit on each line, with its price. For example:<br><b>Navy Blue Suit, 4000</b><br><b>Black Suit 4500</b><br>With the cost price after the price: <b>Navy Blue Suit, 4000, 2800</b><br>A group can be added at the end: <b>White Suit, 3800, 2500, Plain</b>. A suit already in the list gets its price updated.</div>
         <textarea id="m-paste" rows="9" data-bind="modal.text" data-autofocus="1" placeholder="Navy Blue Suit, 4000">${esc(m.text)}</textarea>
         ${m.result ? `<div class="pill ok" style="align-self:flex-start">${m.result.added} added, ${m.result.updated} updated</div>${m.result.skipped.length ? `<div class="hint">These lines were skipped (no price found):<br>${m.result.skipped.map(esc).join('<br>')}</div>` : ''}` : ''}
         <div class="err">${esc(m.error)}</div>
@@ -614,7 +739,7 @@
     let html;
     if (!S.user) html = viewLogin();
     else {
-      const views = { billing: viewBilling, bills: viewBills, prices: viewPrices, sales: viewSales, settings: viewSettings };
+      const views = { billing: viewBilling, bills: viewBills, prices: viewPrices, udhaar: viewUdhaar, profit: viewProfit, sales: viewSales, settings: viewSettings };
       html = shell(views[S.view]());
     }
     html += modalHtml();
@@ -691,7 +816,8 @@
     },
     dchip(el) { S.bill.discType = 'pct'; S.bill.discVal = el.dataset.v; render(); },
     dtype(el) { S.bill.discType = el.dataset.v; render(); },
-    method(el) { S.bill.method = el.dataset.v; if (!isCash(S.bill.method)) S.bill.received = ''; render(); },
+    method(el) { S.bill.method = el.dataset.v; if (!isCash(S.bill.method) && !S.bill.credit) S.bill.received = ''; render(); },
+    credit(el) { S.bill.credit = !!el.dataset.v; S.bill.received = ''; render(); },
     exact() { const c = billCalc(); if (c.t) { S.bill.received = String(c.t.total); render(); } },
     save: (el) => saveBill(!!el.dataset.print),
     saveEnter() { const c = billCalc(); if (c.ok && !S.saving) saveBill(true); },
@@ -712,11 +838,33 @@
       render();
     },
 
-    addSuit() { S.modal = { type: 'suit', id: null, name: '', price: '', group: '', active: true, error: '' }; render(); },
+    addSuit() { S.modal = { type: 'suit', id: null, name: '', price: '', cost: '', group: '', active: true, error: '' }; render(); },
     editSuit(el) {
       const s = S.prices.all.find((x) => x.id === Number(el.dataset.id));
-      S.modal = { type: 'suit', id: s.id, name: s.name, price: String(s.price), group: s.group || '', active: s.active, error: '' };
+      S.modal = { type: 'suit', id: s.id, name: s.name, price: String(s.price), cost: s.cost === null || s.cost === undefined ? '' : String(s.cost), group: s.group || '', active: s.active, error: '' };
       render();
+    },
+    async pickUdhaar(el) {
+      S.udhaar.sel = el.dataset.key;
+      S.udhaar.detail = await call('udhaarCustomer', S.udhaar.sel);
+      S.udhaar.pay = { amount: '', method: S.settings.paymentMethods[0], note: '', uid: uuid() };
+      render();
+    },
+    payMethod(el) { S.udhaar.pay.method = el.dataset.v; render(); },
+    fullUdhaar() { S.udhaar.pay.amount = String(S.udhaar.detail.balance); render(); },
+    async receiveUdhaar() {
+      const U = S.udhaar;
+      if (U.busy || !U.detail) return;
+      const amount = Number(U.pay.amount);
+      if (!U.pay.amount || !Number.isInteger(amount) || amount < 1) { toast('Enter the amount received.', 'error'); return; }
+      if (amount > U.detail.balance) { toast(`This customer owes only ${money(U.detail.balance)}.`, 'error'); return; }
+      U.busy = true; render();
+      try {
+        const r = await call('receiveUdhaar', { uid: U.pay.uid, customerKey: U.sel, amount, method: U.pay.method, note: U.pay.note });
+        if (r.balance <= 0) { U.sel = null; U.detail = null; U.pay = null; } else U.pay = { amount: '', method: U.pay.method, note: '', uid: uuid() };
+        await loadUdhaar();
+        toast(`Received ${money(amount)}. ${r.balance > 0 ? 'Still owes ' + money(r.balance) + '.' : 'Nothing left to pay.'}`);
+      } finally { U.busy = false; render(); }
     },
     pasteList() { S.modal = { type: 'paste', text: '', result: null, error: '' }; render(); },
 
@@ -731,7 +879,7 @@
           S.modal = null;
           await doReveal();
         } else if (m.type === 'suit') {
-          await call('saveSuit', { id: m.id, name: m.name, price: m.price === '' ? 0 : Number(m.price), group: m.group, active: m.active });
+          await call('saveSuit', { id: m.id, name: m.name, price: m.price === '' ? 0 : Number(m.price), cost: m.cost === '' ? '' : Number(m.cost), group: m.group, active: m.active });
           S.modal = null;
           await reloadSuits();
           toast('Saved.');
@@ -844,6 +992,7 @@
     if (el.dataset.rerender) render();
     if (el.dataset.bills) loadBillsSoon();
     if (el.dataset.sales && S.reveal.on) safe(async () => { await loadSales(); render(); });
+    if (el.dataset.profit && S.reveal.on) safe(async () => { await loadProfit(); render(); });
   });
 
   document.addEventListener('change', (e) => {

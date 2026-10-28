@@ -374,7 +374,8 @@ test('receipt shows the discount line under the items, and DUPLICATE only on rep
   assert.ok(first.includes('-400'));
   assert.ok(first.includes('Rs. 3,600'));
   assert.ok(first.includes('Change'));
-  assert.ok(first.includes('Imran'));
+  assert.ok(!first.includes('Imran')); // the customer's name is kept in the records but not printed
+  assert.ok(!first.includes('Served by'));
   assert.ok(!first.includes('DUPLICATE</div>'));
   assert.ok(buildReceiptHtml(b, settings, { duplicate: true }).includes('DUPLICATE</div>'));
 });
@@ -395,4 +396,220 @@ test('wallet payments show no change lines; cash shows received and change', () 
   const c = ctx.svc.createBill(bill(ctx, { received: 5000 })).bill;
   assert.ok(!buildReceiptHtml(w, ctx.svc.getSettings()).includes('Change'));
   assert.ok(buildReceiptHtml(c, ctx.svc.getSettings()).includes('Change'));
+});
+
+// ---------- cost price and profit ----------
+function profitCtx() {
+  const ctx = setup();
+  ctx.svc.saveSuit({ name: 'Plain Grey Suit', price: 1200, cost: 700 });
+  ctx.svc.saveSuit({ name: 'No Cost Suit', price: 2000 });
+  ctx.plain = ctx.svc.listSuits().find((x) => x.name === 'Plain Grey Suit');
+  ctx.nocost = ctx.svc.listSuits().find((x) => x.name === 'No Cost Suit');
+  return ctx;
+}
+const plainBill = (ctx, over = {}) => bill(ctx, { lines: [{ suitId: ctx.plain.id, qty: 1 }], received: 1200, ...over });
+
+test('profit: cost 700 sold at 1200 gives 500; with a Rs. 200 discount it gives 300', () => {
+  const ctx = profitCtx();
+  const a = ctx.svc.createBill(plainBill(ctx)).bill;
+  assert.deepEqual([a.total, a.costTotal, a.profit], [1200, 700, 500]);
+  const b = ctx.svc.createBill(plainBill(ctx, { discount: { type: 'amt', value: 200 }, received: 1000 })).bill;
+  assert.deepEqual([b.total, b.costTotal, b.profit], [1000, 700, 300]);
+  const r = ctx.svc.profitReport();
+  assert.deepEqual([r.sales, r.cost, r.profit, r.discounts, r.known, r.unknown], [2200, 1400, 800, 200, 2, 0]);
+});
+
+test('profit uses quantity and the percent discount', () => {
+  const ctx = profitCtx();
+  const b = ctx.svc.createBill(plainBill(ctx, { lines: [{ suitId: ctx.plain.id, qty: 3 }], discount: { type: 'pct', value: 10 }, received: 3240 })).bill;
+  assert.deepEqual([b.subtotal, b.total, b.costTotal, b.profit], [3600, 3240, 2100, 1140]);
+});
+
+test('bills with a suit that has no cost are counted as unknown, not as zero cost', () => {
+  const ctx = profitCtx();
+  ctx.svc.createBill(plainBill(ctx));
+  const u = ctx.svc.createBill(bill(ctx, { lines: [{ suitId: ctx.nocost.id, qty: 1 }], received: 2000 })).bill;
+  assert.equal(u.profit, null);
+  const r = ctx.svc.profitReport();
+  assert.deepEqual([r.sales, r.profit, r.known, r.unknown], [1200, 500, 1, 1]);
+  assert.ok(r.missingCost.includes('No Cost Suit'));
+  assert.ok(!r.missingCost.includes('Plain Grey Suit'));
+});
+
+test('changing a suit cost later does not change the profit of old bills', () => {
+  const ctx = profitCtx();
+  const a = ctx.svc.createBill(plainBill(ctx)).bill;
+  ctx.svc.saveSuit({ id: ctx.plain.id, name: 'Plain Grey Suit', price: 1200, cost: 900 });
+  assert.equal(ctx.svc.getBill(a.id).profit, 500);
+  assert.equal(ctx.svc.createBill(plainBill(ctx)).bill.profit, 300);
+});
+
+test('cancelled bills are not in the profit', () => {
+  const ctx = profitCtx();
+  const a = ctx.svc.createBill(plainBill(ctx)).bill;
+  ctx.svc.createBill(plainBill(ctx));
+  ctx.svc.cancelBill(a.id, 'wrong bill');
+  assert.equal(ctx.svc.profitReport().profit, 500);
+});
+
+test('staff never see a suit cost or any profit; the owner does', () => {
+  const ctx = profitCtx();
+  const a = ctx.svc.createBill(plainBill(ctx)).bill;
+  ctx.svc.saveUser({ username: 'staff1', name: 'Ali', role: 'staff', password: 'ali12345' });
+  ctx.svc.logout();
+  ctx.svc.login('staff1', 'ali12345');
+  assert.ok(ctx.svc.listSuits({}).every((x) => !('cost' in x)));
+  const seen = ctx.svc.getBill(a.id);
+  assert.ok(!('profit' in seen) && !('costTotal' in seen) && seen.lines.every((l) => !('cost' in l)));
+  const made = ctx.svc.createBill(plainBill(ctx)).bill;
+  assert.ok(!('profit' in made) && made.lines.every((l) => !('cost' in l)));
+  assert.ok(ctx.svc.searchBills({}).every((x) => !('profit' in x)));
+  assert.throws(() => ctx.svc.profitReport(), /Only the owner/);
+  ctx.svc.logout();
+  ctx.svc.login('owner', 'owner1234');
+  assert.equal(ctx.svc.getBill(a.id).profit, 500);
+});
+
+test('cost must be a whole number or empty; pasted lists can carry a cost', () => {
+  const ctx = setup();
+  assert.throws(() => ctx.svc.saveSuit({ name: 'X', price: 1000, cost: -5 }), /Cost must be/);
+  assert.throws(() => ctx.svc.saveSuit({ name: 'X', price: 1000, cost: 10.5 }), /Cost must be/);
+  assert.equal(ctx.svc.saveSuit({ name: 'X', price: 1000, cost: '' }).cost, null);
+  assert.equal(ctx.svc.saveSuit({ name: 'Y', price: 1000, cost: '600' }).cost, 600);
+  const { good } = parseSuitLines('Plain Suit, 4000, 2800\nCheck Suit, 3500, 2000, Check\nWhite Suit, 3800, Plain\nOld Suit 3000');
+  assert.deepEqual(good.map((g) => [g.name, g.price, g.cost, g.group]), [
+    ['Plain Suit', 4000, 2800, ''], ['Check Suit', 3500, 2000, 'Check'], ['White Suit', 3800, null, 'Plain'], ['Old Suit', 3000, null, ''],
+  ]);
+  ctx.svc.importSuits('Plain Suit, 4000, 2800');
+  ctx.svc.importSuits('Plain Suit, 4100');
+  assert.equal(ctx.svc.listSuits().find((x) => x.name === 'Plain Suit').cost, 2800); // a price-only line keeps the cost
+});
+
+// ---------- udhaar ----------
+const credit = (ctx, over = {}) => bill(ctx, {
+  lines: [{ suitId: ctx.suits['Navy Blue Suit'].id, qty: 1 }], credit: true, received: 1000,
+  customerName: 'Imran Khan', customerPhone: '0300-1234567', ...over,
+});
+
+test('udhaar: Rs. 3000 bill, Rs. 1000 paid now, Rs. 2000 owed', () => {
+  const ctx = setup();
+  const b = ctx.svc.createBill(credit(ctx, { lines: [{ suitId: ctx.suits['Navy Blue Suit'].id, qty: 1 }, { suitId: ctx.suits['Navy Blue Suit'].id, qty: 0 + 1 }], discount: { type: 'amt', value: 5000 } })).bill;
+  assert.deepEqual([b.total, b.paid, b.due, b.change], [3000, 1000, 2000, 0]);
+  const l = ctx.svc.listUdhaar();
+  assert.equal(l.total, 2000);
+  assert.deepEqual([l.customers[0].name, l.customers[0].balance], ['Imran Khan', 2000]);
+});
+
+test('udhaar needs a name and a phone, and the amount paid now must be less than the total', () => {
+  const ctx = setup();
+  assert.throws(() => ctx.svc.createBill(credit(ctx, { customerName: '' })), /customer name/);
+  assert.throws(() => ctx.svc.createBill(credit(ctx, { customerPhone: '' })), /phone number/);
+  assert.throws(() => ctx.svc.createBill(credit(ctx, { customerPhone: '123' })), /phone number/);
+  assert.throws(() => ctx.svc.createBill(credit(ctx, { received: 4000 })), /paying the full amount/);
+  assert.throws(() => ctx.svc.createBill(credit(ctx, { received: 5000 })), /paying the full amount/);
+  assert.throws(() => ctx.svc.createBill(credit(ctx, { received: -5 })), /whole number/);
+  assert.equal(ctx.svc.d.bills.length, 0);
+});
+
+test('udhaar with nothing paid now is recorded as Udhaar and adds nothing to money received', () => {
+  const ctx = setup();
+  const b = ctx.svc.createBill(credit(ctx, { received: '' })).bill;
+  assert.deepEqual([b.method, b.paid, b.due], ['Udhaar', 0, 4000]);
+  const d = ctx.svc.dailyReport();
+  assert.equal(d.sales, 4000);
+  assert.equal(d.udhaarGiven, 4000);
+  assert.deepEqual(d.byMethod, {});
+});
+
+test('paying back udhaar reduces the balance and cannot go past what is owed', () => {
+  const ctx = setup();
+  ctx.svc.createBill(credit(ctx)); // owes 3000
+  const key = ctx.svc.listUdhaar().customers[0].key;
+  const pay = (amount, extra = {}) => ctx.svc.receiveUdhaar({ uid: 'pay-' + Math.random().toString(36).slice(2) + '-xxxx', customerKey: key, amount, method: 'Cash', ...extra });
+  assert.equal(pay(500).balance, 2500);
+  assert.throws(() => pay(2501), /owes only Rs. 2500/);
+  assert.throws(() => pay(0), /whole rupees/);
+  assert.throws(() => pay(10.5), /whole rupees/);
+  assert.throws(() => pay(100, { method: 'Cheque' }), /how the customer paid/);
+  assert.equal(pay(2500).balance, 0);
+  assert.equal(ctx.svc.listUdhaar().customers.length, 0);
+  assert.throws(() => pay(1), /owes nothing/);
+});
+
+test('the same payment sent twice is recorded once', () => {
+  const ctx = setup();
+  ctx.svc.createBill(credit(ctx));
+  const key = ctx.svc.listUdhaar().customers[0].key;
+  const input = { uid: 'pay-one-0001', customerKey: key, amount: 1000, method: 'Cash' };
+  ctx.svc.receiveUdhaar(input);
+  const again = ctx.svc.receiveUdhaar(input);
+  assert.equal(again.duplicate, true);
+  assert.equal(ctx.svc.listUdhaar().total, 2000);
+});
+
+test('one customer with several bills and a phone written in different ways is one account', () => {
+  const ctx = setup();
+  ctx.svc.createBill(credit(ctx, { customerPhone: '0300-1234567', received: 3000 })); // owes 1000
+  ctx.svc.createBill(credit(ctx, { customerPhone: '+92 300 1234567', customerName: 'Imran', received: 2000 })); // owes 2000
+  const l = ctx.svc.listUdhaar();
+  assert.equal(l.customers.length, 1);
+  assert.equal(l.total, 3000);
+  const c = ctx.svc.udhaarCustomer(l.customers[0].key);
+  assert.equal(c.billList.length, 2);
+  assert.equal(c.balance, 3000);
+});
+
+test('payment received later shows in the day report as money received but not as sales', () => {
+  const ctx = setup();
+  ctx.svc.createBill(credit(ctx)); // sales 4000, cash 1000 now
+  ctx.clock.t = new Date(2026, 9, 27, 11, 0, 0);
+  const key = ctx.svc.listUdhaar().customers[0].key;
+  ctx.svc.receiveUdhaar({ uid: 'pay-day-0002', customerKey: key, amount: 700, method: 'JazzCash' });
+  const d = ctx.svc.dailyReport();
+  assert.deepEqual([d.sales, d.udhaarCollected, d.byMethod.JazzCash], [0, 700, 700]);
+  const y = ctx.svc.dailyReport('2026-10-26');
+  assert.deepEqual([y.sales, y.udhaarGiven, y.byMethod.Cash], [4000, 3000, 1000]);
+});
+
+test('a cancelled udhaar bill leaves the account, unless the customer already paid more than the other bills', () => {
+  const ctx = setup();
+  const a = ctx.svc.createBill(credit(ctx)).bill; // owes 3000
+  ctx.svc.cancelBill(a.id, 'wrong bill');
+  assert.equal(ctx.svc.listUdhaar().customers.length, 0);
+  const b = ctx.svc.createBill(credit(ctx)).bill; // owes 3000 again
+  const key = ctx.svc.listUdhaar().customers[0].key;
+  ctx.svc.receiveUdhaar({ uid: 'pay-can-0003', customerKey: key, amount: 500, method: 'Cash' });
+  assert.throws(() => ctx.svc.cancelBill(b.id, 'wrong bill'), /already paid back/);
+});
+
+test('only the owner can see or change udhaar accounts', () => {
+  const ctx = setup();
+  ctx.svc.createBill(credit(ctx));
+  ctx.svc.saveUser({ username: 'staff1', name: 'Ali', role: 'staff', password: 'ali12345' });
+  ctx.svc.logout();
+  ctx.svc.login('staff1', 'ali12345');
+  assert.throws(() => ctx.svc.listUdhaar(), /Only the owner/);
+  assert.throws(() => ctx.svc.receiveUdhaar({ uid: 'pay-staff-0004', customerKey: '03001234567', amount: 1, method: 'Cash' }), /Only the owner/);
+  // staff can still make an udhaar bill at the counter
+  assert.equal(ctx.svc.createBill(credit(ctx)).bill.due, 3000);
+});
+
+test('the receipt never shows udhaar, the customer, or who served', () => {
+  const ctx = setup();
+  const b = ctx.svc.createBill(credit(ctx)).bill;
+  const html = buildReceiptHtml(b, ctx.svc.getSettings());
+  for (const word of ['Imran', '0300', 'Udhaar', 'UDHAAR', 'Balance', 'BALANCE', 'Served', 'Paid now', 'Cash']) assert.ok(!html.includes(word), word);
+  assert.ok(html.includes('Rs. 4,000'));
+});
+
+test('old data without the new fields still loads and counts correctly', () => {
+  const ctx = setup();
+  const b = ctx.svc.createBill(bill(ctx)).bill;
+  delete ctx.svc.d.bills[0].paid;
+  delete ctx.svc.d.bills[0].due;
+  delete ctx.svc.d.payments;
+  ctx.svc.d.payments = [];
+  assert.equal(ctx.svc.dailyReport().byMethod.Cash, 4000);
+  assert.equal(ctx.svc.listUdhaar().total, 0);
+  assert.equal(ctx.svc.getBill(b.id).total, 4000);
 });

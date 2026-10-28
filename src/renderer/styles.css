@@ -150,3 +150,5 @@ tr.sel td { background: var(--accent-soft); }
 .login .sub { color: var(--muted); margin: 4px 0 18px; }
 .err { color: var(--danger); min-height: 18px; font-size: 13px; margin-top: 8px; }
 .imgprev { max-height: 56px; max-width: 120px; border: 1px solid var(--line); background: #fff; padding: 3px; border-radius: 4px; }
+.change.due { background: var(--warn-soft); color: #6f5415; }
+.big-change.due { color: #6f5415; }

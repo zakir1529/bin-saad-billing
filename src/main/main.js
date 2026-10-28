@@ -15,7 +15,7 @@ let service = null;
 let lastBackup = { ok: null, at: null, error: '', target: '' };
 let backupTimer = null;
 
-const MUTATING = new Set(['createBill', 'cancelBill', 'saveSuit', 'importSuits', 'saveUser', 'saveSettings', 'setupOwner', 'changePassword']);
+const MUTATING = new Set(['createBill', 'cancelBill', 'saveSuit', 'importSuits', 'saveUser', 'saveSettings', 'setupOwner', 'changePassword', 'receiveUdhaar']);
 
 // ---------- start-up ----------
 if (!app.requestSingleInstanceLock()) {

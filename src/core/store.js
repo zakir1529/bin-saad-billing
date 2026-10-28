@@ -30,6 +30,7 @@ function freshData() {
     users: [],
     suits: [],
     bills: [],
+    payments: [], // money received later from customers who took udhaar
     counters: { billNo: 0, id: 0 },
     audit: [],
   };

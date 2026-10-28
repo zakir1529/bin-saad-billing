@@ -9,6 +9,7 @@ const PUBLIC_METHODS = [
   'status', 'setupOwner', 'login', 'logout', 'getSettings', 'saveSettings',
   'listSuits', 'saveSuit', 'importSuits', 'createBill', 'getBill', 'searchBills', 'cancelBill',
   'dailyReport', 'monthlyReport', 'verifyPassword', 'listUsers', 'saveUser', 'changePassword', 'auditLog',
+  'profitReport', 'listUdhaar', 'udhaarCustomer', 'receiveUdhaar',
 ];
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -38,7 +39,16 @@ function formatBillNo(n) {
   return String(n).padStart(4, '0');
 }
 
-// "Navy Blue Suit, 4000" | "Navy Blue Suit 4000" | "Navy Blue Suit, 4000, Plain" | tab/semicolon separated
+// A phone number as digits only, so 0300-1234567 and +92 300 1234567 are the same customer.
+function phoneKey(phone) {
+  let d = String(phone || '').replace(/\D/g, '');
+  if (d.startsWith('0092')) d = '0' + d.slice(4);
+  else if (d.startsWith('92') && d.length === 12) d = '0' + d.slice(2);
+  return d;
+}
+
+// "Navy Blue Suit, 4000" | "Navy Blue Suit 4000" | "Navy Blue Suit, 4000, 2800" (second number = cost)
+// | "Navy Blue Suit, 4000, Plain" (text = group) | "Navy Blue Suit, 4000, 2800, Plain"
 function parseSuitLines(text) {
   const good = [];
   const bad = [];
@@ -56,10 +66,24 @@ function parseSuitLines(text) {
       bad.push(raw.trim());
       continue;
     }
-    good.push({ name: m[1].trim(), price, group: (m[3] || '').trim() });
+    let cost = null;
+    let group = (m[3] || '').trim();
+    const c = group.match(/^(?:Rs\.?\s*)?(\d+)\s*(?:[,;\t]\s*(.*))?$/i);
+    if (c) {
+      cost = parseInt(c[1], 10);
+      group = (c[2] || '').trim();
+      if (cost > MAX_PRICE) {
+        bad.push(raw.trim());
+        continue;
+      }
+    }
+    good.push({ name: m[1].trim(), price, cost, group });
   }
   return { good, bad };
 }
+
+const paidOf = (b) => (b.paid === undefined ? b.total : b.paid);
+const dueOf = (b) => (b.due === undefined ? 0 : b.due);
 
 class Service {
   constructor({ store, now }) {
@@ -94,6 +118,17 @@ class Service {
   }
   _pub(u) {
     return u ? { id: u.id, name: u.name, username: u.username, role: u.role } : null;
+  }
+  // What a bill looks like to the person asking: staff never see cost or profit.
+  _view(b) {
+    const c = clone(b);
+    const u = this._user();
+    if (!u || u.role !== 'owner') {
+      delete c.costTotal;
+      delete c.profit;
+      for (const l of c.lines) delete l.cost;
+    }
+    return c;
   }
   _audit(user, action, detail) {
     this.d.audit.push({ ts: this.now().toISOString(), user: user ? user.username : '-', action, detail: detail || '' });
@@ -238,7 +273,9 @@ class Service {
   listSuits({ includeInactive } = {}) {
     const u = this._requireUser();
     const all = includeInactive && u.role === 'owner';
-    return clone(this.d.suits.filter((s) => all || s.active)).sort((a, b) => a.name.localeCompare(b.name));
+    const list = clone(this.d.suits.filter((s) => all || s.active)).sort((a, b) => a.name.localeCompare(b.name));
+    if (u.role !== 'owner') for (const s of list) delete s.cost; // staff never see what a suit costs the shop
+    return list;
   }
 
   _checkSuit(input) {
@@ -247,7 +284,12 @@ class Service {
     if (name.length > 80) throw new UserError('Suit name is too long.');
     const price = Number(input.price);
     if (!Number.isInteger(price) || price < 1 || price > MAX_PRICE) throw new UserError('Price must be a whole number of rupees, more than 0.');
-    return { name, price, group: String(input.group || '').trim().slice(0, 30) };
+    let cost = null;
+    if (input.cost !== undefined && input.cost !== null && input.cost !== '') {
+      cost = Number(input.cost);
+      if (!Number.isInteger(cost) || cost < 0 || cost > MAX_PRICE) throw new UserError('Cost must be a whole number of rupees (or leave it empty).');
+    }
+    return { name, price, cost, group: String(input.group || '').trim().slice(0, 30) };
   }
 
   saveSuit(input = {}) {
@@ -263,10 +305,10 @@ class Service {
         s = { id: ++d.counters.id, active: true };
         d.suits.push(s);
       }
-      const before = existing ? `${s.name} ${s.price}` : '';
+      const before = existing ? `${s.name} ${s.price}${s.cost === null || s.cost === undefined ? '' : ' cost ' + s.cost}` : '';
       Object.assign(s, v);
       if (input.active !== undefined) s.active = !!input.active;
-      this._audit(u, existing ? 'suit-edit' : 'suit-add', `${before ? before + ' -> ' : ''}${s.name} ${s.price}${s.active ? '' : ' (off)'}`);
+      this._audit(u, existing ? 'suit-edit' : 'suit-add', `${before ? before + ' -> ' : ''}${s.name} ${s.price}${s.cost === null ? '' : ' cost ' + s.cost}${s.active ? '' : ' (off)'}`);
       return clone(s);
     });
   }
@@ -282,11 +324,12 @@ class Service {
         const s = d.suits.find((x) => x.name.toLowerCase() === item.name.toLowerCase());
         if (s) {
           s.price = item.price;
+          if (item.cost !== null) s.cost = item.cost;
           if (item.group) s.group = item.group;
           s.active = true;
           updated++;
         } else {
-          d.suits.push({ id: ++d.counters.id, name: item.name, price: item.price, group: item.group, active: true });
+          d.suits.push({ id: ++d.counters.id, name: item.name, price: item.price, cost: item.cost, group: item.group, active: true });
           added++;
         }
       }
@@ -304,7 +347,7 @@ class Service {
 
     // Pressing Save twice (or a resend) must never make a second bill.
     const dup = this.d.bills.find((b) => b.uid === uid);
-    if (dup) return { bill: clone(dup), duplicate: true };
+    if (dup) return { bill: this._view(dup), duplicate: true };
 
     if (!Array.isArray(input.lines) || input.lines.length === 0) throw new UserError('Add at least one suit to the bill.');
     if (input.lines.length > 100) throw new UserError('Too many lines on one bill.');
@@ -319,9 +362,14 @@ class Service {
       const prev = merged.get(suit.id);
       merged.set(suit.id, { suit, qty: (prev ? prev.qty : 0) + qty });
     }
-    const lines = [...merged.values()].map(({ suit, qty }) => ({ suitId: suit.id, name: suit.name, price: suit.price, qty }));
+    const lines = [...merged.values()].map(({ suit, qty }) => ({
+      suitId: suit.id, name: suit.name, price: suit.price, cost: suit.cost === undefined ? null : suit.cost, qty,
+    }));
     const t = computeTotals(lines, input.discount);
     const lineRows = lines.map((l) => ({ ...l, amount: l.price * l.qty }));
+    // The cost is copied onto the bill, so a later change to a suit's cost never rewrites old profit.
+    const costKnown = lines.every((l) => l.cost !== null);
+    const costTotal = costKnown ? lines.reduce((sum, l) => sum + l.cost * l.qty, 0) : null;
 
     if (t.total < 1) throw new UserError('The total cannot be zero. Check the discount.');
     if (user.role !== 'owner' && t.subtotal > 0) {
@@ -331,21 +379,40 @@ class Service {
       }
     }
 
-    const method = String(input.method || '');
-    if (!settings.paymentMethods.includes(method)) throw new UserError('Choose how the customer is paying.');
-    const isCash = method.toLowerCase() === 'cash';
-    let received = input.received === undefined || input.received === '' || input.received === null ? null : Number(input.received);
-    if (received === null) {
-      if (isCash) throw new UserError('Enter the amount received.');
-      received = t.total;
-    }
-    if (!isRupees(received)) throw new UserError('Amount received must be a whole number of rupees.');
-    if (received < t.total) throw new UserError('The amount received is less than the total.');
-    if (!isCash && received !== t.total) throw new UserError('For ' + method + ' the amount received must equal the total.');
-    const change = received - t.total;
-
     const customerName = String(input.customerName || '').trim().slice(0, 60);
     const customerPhone = String(input.customerPhone || '').trim().slice(0, 25);
+
+    let method = String(input.method || '');
+    let received;
+    let paid;
+    let due = 0;
+    let change = 0;
+    const blank = input.received === undefined || input.received === '' || input.received === null;
+    if (input.credit) {
+      // Udhaar: the customer pays part (or nothing) now and owes the rest.
+      if (!customerName) throw new UserError('Udhaar needs the customer name.');
+      if (phoneKey(customerPhone).length < 7) throw new UserError('Udhaar needs the customer phone number.');
+      paid = blank ? 0 : Number(input.received);
+      if (!isRupees(paid)) throw new UserError('The amount paid now must be a whole number of rupees.');
+      if (paid >= t.total) throw new UserError('The customer is paying the full amount. Turn off udhaar, or enter less than the total.');
+      if (paid > 0 && !settings.paymentMethods.includes(method)) throw new UserError('Choose how the customer is paying.');
+      if (paid === 0) method = 'Udhaar';
+      received = paid;
+      due = t.total - paid;
+    } else {
+      if (!settings.paymentMethods.includes(method)) throw new UserError('Choose how the customer is paying.');
+      const isCash = method.toLowerCase() === 'cash';
+      received = blank ? null : Number(input.received);
+      if (received === null) {
+        if (isCash) throw new UserError('Enter the amount received.');
+        received = t.total;
+      }
+      if (!isRupees(received)) throw new UserError('Amount received must be a whole number of rupees.');
+      if (received < t.total) throw new UserError('The amount received is less than the total.');
+      if (!isCash && received !== t.total) throw new UserError('For ' + method + ' the amount received must equal the total.');
+      change = received - t.total;
+      paid = t.total;
+    }
 
     return this.store.run((d) => {
       const now = this.now();
@@ -359,21 +426,26 @@ class Service {
         cashier: user.name,
         customerName,
         customerPhone,
+        customerKey: phoneKey(customerPhone),
         lines: lineRows,
         subtotal: t.subtotal,
         discountType: t.discountType,
         discountValue: t.discountValue,
         discount: t.discount,
         total: t.total,
+        costTotal,
+        profit: costTotal === null ? null : t.total - costTotal,
         method,
         received,
         change,
+        paid,
+        due,
         status: 'paid',
         printCount: 0,
       };
       d.bills.push(bill);
-      this._audit(user, 'bill', `#${formatBillNo(no)} total ${t.total}` + (t.discount ? ` discount ${t.discount}` : ''));
-      return { bill: clone(bill), duplicate: false };
+      this._audit(user, 'bill', `#${formatBillNo(no)} total ${t.total}` + (t.discount ? ` discount ${t.discount}` : '') + (due ? ` udhaar ${due} (${customerName})` : ''));
+      return { bill: this._view(bill), duplicate: false };
     });
   }
 
@@ -381,7 +453,7 @@ class Service {
     this._requireUser();
     const b = this.d.bills.find((x) => x.id === id);
     if (!b) throw new UserError('Bill not found.');
-    return clone(b);
+    return this._view(b);
   }
 
   // Called by the printing code after a receipt really printed.
@@ -400,13 +472,16 @@ class Service {
     if (b.status === 'cancelled') throw new UserError('This bill is already cancelled.');
     const why = String(reason || '').trim();
     if (why.length < 3) throw new UserError('Write the reason for cancelling.');
+    if (dueOf(b) > 0 && this._balanceOf(b.customerKey) - dueOf(b) < 0) {
+      throw new UserError('This customer has already paid back udhaar that includes this bill, so it cannot be cancelled. Ask the developer for help.');
+    }
     return this.store.run(() => {
       b.status = 'cancelled';
       b.cancelledAt = this.now().toISOString();
       b.cancelledBy = u.name;
       b.cancelReason = why.slice(0, 200);
       this._audit(u, 'cancel', `#${formatBillNo(b.no)} total ${b.total}: ${b.cancelReason}`);
-      return clone(b);
+      return this._view(b);
     });
   }
 
@@ -431,7 +506,7 @@ class Service {
           b.lines.some((l) => l.name.toLowerCase().includes(q));
         if (!hit) continue;
       }
-      out.push(clone(b));
+      out.push(this._view(b));
     }
     return out;
   }
@@ -441,12 +516,14 @@ class Service {
     const byMethod = {};
     let sales = 0;
     let discounts = 0;
+    let udhaarGiven = 0;
     for (const b of bills) {
       sales += b.total;
       discounts += b.discount;
-      byMethod[b.method] = (byMethod[b.method] || 0) + b.total;
+      udhaarGiven += dueOf(b);
+      if (paidOf(b) > 0) byMethod[b.method] = (byMethod[b.method] || 0) + paidOf(b);
     }
-    return { sales, bills: bills.length, discounts, byMethod };
+    return { sales, bills: bills.length, discounts, byMethod, udhaarGiven };
   }
 
   dailyReport(dateKey) {
@@ -454,7 +531,15 @@ class Service {
     const key = dateKey || dateKeyOf(this.now());
     const day = this.d.bills.filter((b) => b.dateKey === key);
     const paid = day.filter((b) => b.status === 'paid');
-    return { dateKey: key, ...this._sum(paid), cancelled: day.length - paid.length };
+    const sum = this._sum(paid);
+    // Udhaar money that came in today counts as money received, though not as new sales.
+    let udhaarCollected = 0;
+    for (const p of this.d.payments) {
+      if (p.dateKey !== key) continue;
+      udhaarCollected += p.amount;
+      sum.byMethod[p.method] = (sum.byMethod[p.method] || 0) + p.amount;
+    }
+    return { dateKey: key, ...sum, udhaarCollected, cancelled: day.length - paid.length };
   }
 
   monthlyReport(ym) {
@@ -488,6 +573,151 @@ class Service {
       topSuits: [...suits.values()].sort((a, b) => b.qty - a.qty || b.amount - a.amount).slice(0, 10),
       prev: { ym: prevKey, sales: prev.sales, bills: prev.bills },
     };
+  }
+
+  // ---------- profit (owner only) ----------
+  // Profit = what the customer paid for the bill (after any discount) minus what the suits cost the shop.
+  // A bill where some suit had no cost price entered is left out and counted as "unknown".
+  _profitTotals(bills) {
+    let sales = 0;
+    let cost = 0;
+    let discounts = 0;
+    let known = 0;
+    let unknown = 0;
+    for (const b of bills) {
+      if (b.costTotal === null || b.costTotal === undefined) {
+        unknown++;
+        continue;
+      }
+      known++;
+      sales += b.total;
+      cost += b.costTotal;
+      discounts += b.discount;
+    }
+    return { sales, cost, profit: sales - cost, discounts, known, unknown };
+  }
+
+  profitReport(ym) {
+    this._requireOwner();
+    const now = this.now();
+    const key = ym || `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+    if (!/^\d{4}-\d{2}$/.test(key)) throw new UserError('Pick a month.');
+    const [y, m] = key.split('-').map(Number);
+    const prevKey = m === 1 ? `${y - 1}-12` : `${y}-${pad2(m - 1)}`;
+    const inMonth = (k) => this.d.bills.filter((b) => b.status === 'paid' && b.dateKey.startsWith(k + '-'));
+    const bills = inMonth(key);
+    const totals = this._profitTotals(bills);
+    const days = new Map();
+    const suits = new Map();
+    for (const b of bills) {
+      const dd = days.get(b.dateKey) || { dateKey: b.dateKey, bills: [] };
+      dd.bills.push(b);
+      days.set(b.dateKey, dd);
+      if (b.costTotal === null || b.costTotal === undefined) continue;
+      for (const l of b.lines) {
+        const x = suits.get(l.name) || { name: l.name, qty: 0, sales: 0, cost: 0 };
+        x.qty += l.qty;
+        x.sales += l.amount;
+        x.cost += l.cost * l.qty;
+        suits.set(l.name, x);
+      }
+    }
+    const byDay = [...days.values()]
+      .map((dd) => ({ dateKey: dd.dateKey, ...this._profitTotals(dd.bills) }))
+      .sort((a, b) => (a.dateKey < b.dateKey ? -1 : 1));
+    const bySuit = [...suits.values()]
+      .map((x) => ({ ...x, profit: x.sales - x.cost }))
+      .sort((a, b) => b.profit - a.profit);
+    const missingCost = this.d.suits.filter((x) => x.active && (x.cost === null || x.cost === undefined)).map((x) => x.name).sort();
+    const prev = this._profitTotals(inMonth(prevKey));
+    return { ym: key, ...totals, byDay, bySuit, missingCost, prev: { ym: prevKey, profit: prev.profit, known: prev.known } };
+  }
+
+  // ---------- udhaar (money customers still owe) ----------
+  // A customer is identified by phone number. What they owe = every unpaid part of their bills minus what they paid back.
+  _balanceOf(key) {
+    if (!key) return 0;
+    let owed = 0;
+    for (const b of this.d.bills) if (b.status === 'paid' && b.customerKey === key) owed += dueOf(b);
+    for (const p of this.d.payments) if (p.customerKey === key) owed -= p.amount;
+    return owed;
+  }
+
+  _udhaarCustomers() {
+    const map = new Map();
+    const get = (key) => {
+      if (!map.has(key)) map.set(key, { key, name: '', phone: '', owed: 0, paidBack: 0, lastAt: '', bills: 0 });
+      return map.get(key);
+    };
+    for (const b of this.d.bills) {
+      if (b.status !== 'paid' || dueOf(b) <= 0) continue;
+      const c = get(b.customerKey);
+      c.owed += dueOf(b);
+      c.bills += 1;
+      c.name = b.customerName || c.name;
+      c.phone = b.customerPhone || c.phone;
+      if (b.createdAt > c.lastAt) c.lastAt = b.createdAt;
+    }
+    for (const p of this.d.payments) {
+      const c = map.get(p.customerKey);
+      if (!c) continue;
+      c.paidBack += p.amount;
+      if (p.at > c.lastAt) c.lastAt = p.at;
+    }
+    for (const c of map.values()) c.balance = c.owed - c.paidBack;
+    return map;
+  }
+
+  listUdhaar() {
+    this._requireOwner();
+    const all = [...this._udhaarCustomers().values()];
+    const customers = all.filter((c) => c.balance > 0).sort((a, b) => b.balance - a.balance);
+    return { customers, total: customers.reduce((sum, c) => sum + c.balance, 0) };
+  }
+
+  udhaarCustomer(key) {
+    this._requireOwner();
+    const c = this._udhaarCustomers().get(String(key || ''));
+    if (!c) throw new UserError('This customer has no udhaar.');
+    const bills = this.d.bills
+      .filter((b) => b.status === 'paid' && b.customerKey === c.key && dueOf(b) > 0)
+      .map((b) => ({ id: b.id, no: b.no, createdAt: b.createdAt, total: b.total, paid: paidOf(b), due: dueOf(b) }));
+    const payments = clone(this.d.payments.filter((p) => p.customerKey === c.key));
+    return { ...c, billList: bills, payments };
+  }
+
+  receiveUdhaar(input = {}) {
+    const u = this._requireOwner();
+    const uid = String(input.uid || '');
+    if (uid.length < 8) throw new UserError('This payment has no reference number. Please open the customer again.');
+    const dup = this.d.payments.find((p) => p.uid === uid);
+    if (dup) return { payment: clone(dup), balance: this._balanceOf(dup.customerKey), duplicate: true };
+    const key = String(input.customerKey || '');
+    const cust = this._udhaarCustomers().get(key);
+    if (!cust || cust.balance <= 0) throw new UserError('This customer owes nothing.');
+    const amount = Number(input.amount);
+    if (!Number.isInteger(amount) || amount < 1) throw new UserError('Enter the amount received, in whole rupees.');
+    if (amount > cust.balance) throw new UserError(`This customer owes only Rs. ${cust.balance}. Enter that or less.`);
+    const method = String(input.method || '');
+    if (!this.d.settings.paymentMethods.includes(method)) throw new UserError('Choose how the customer paid.');
+    return this.store.run((d) => {
+      const now = this.now();
+      const payment = {
+        id: ++d.counters.id,
+        uid,
+        customerKey: key,
+        customerName: cust.name,
+        amount,
+        method,
+        note: String(input.note || '').trim().slice(0, 100),
+        at: now.toISOString(),
+        dateKey: dateKeyOf(now),
+        by: u.name,
+      };
+      d.payments.push(payment);
+      this._audit(u, 'udhaar-payment', `${cust.name} ${cust.phone}: ${amount} by ${method}`);
+      return { payment: clone(payment), balance: cust.balance - amount, duplicate: false };
+    });
   }
 
   auditLog(limit = 200) {

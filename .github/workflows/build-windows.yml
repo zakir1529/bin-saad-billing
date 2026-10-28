@@ -18,17 +18,7 @@ jobs:
       - name: Run the billing tests
         run: npm test
       - name: Build the Windows installer
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Continue"
-          npm run dist *> build.log
-          $code = $LASTEXITCODE
-          Get-Content build.log | Select-Object -Last 60
-          if ($code -ne 0) {
-            $i = 0
-            Get-Content build.log | Select-Object -Last 9 | ForEach-Object { $i++; Write-Host "::error title=build log $i::$($_ -replace '[\r\n%]',' ')" }
-            exit $code
-          }
+        run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - uses: actions/upload-artifact@v4

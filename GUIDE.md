@@ -7,7 +7,9 @@ A desktop billing program for Bin Saad Fabrics. It installs on the shop's Window
 - Tap a suit to add it to the bill. Tap again for quantity 2. Search by typing; Enter adds the suit if only one matches.
 - Discount in percent (5, 10, 15 or any number) or in rupees. Example: 10% on Rs. 4,000 prints `Discount (10%)  -400` and a total of Rs. 3,600.
 - Payment by Cash, JazzCash, Easypaisa or Bank (editable in Settings). Cash shows the change to return in large type.
-- Receipt on 80mm or 58mm paper with shop name, address, phone, items, discount, total, payment and change. Logo and WhatsApp QR code can be added later in Settings.
+- Receipt on 80mm or 58mm paper: shop name, address, phone, numbered items, discount line, boxed total, "You saved" line, payment and change. It never shows the customer's name or phone, who served, or any udhaar. Logo and WhatsApp QR code can be added later in Settings.
+- **Udhaar tab** (owner): a customer pays part of a bill now and owes the rest (Rs. 3,000 bill, Rs. 1,000 paid, Rs. 2,000 owed). On the New bill screen choose **Udhaar**, enter what was paid now (or nothing) and the customer's name and phone. The Udhaar tab lists everyone who owes, with their bills, and records money they bring back later. Customers are matched by phone number.
+- **Profit tab** (owner, hidden behind the eye): enter a cost price for each suit in the Price list. Each bill keeps the cost it was sold at. Profit = what the customer paid after discount minus cost (Rs. 700 cost sold at Rs. 1,200 = Rs. 500; with Rs. 200 discount = Rs. 300). Bills with a suit that has no cost price are left out and reported, never counted as zero cost.
 - Bills list: search by bill number, customer name, phone, suit or date. Reprint (marked DUPLICATE) and owner-only cancel with a reason.
 - Sales for any day and any month, this month against last month, best sellers. Hidden behind an eye button with a slash. Click it, enter the owner password, and the figures show for 15 seconds, then hide again. Staff never see sales.
 - Owner and staff logins. Staff can bill and reprint but cannot change prices, cancel bills, see sales, or give a discount above the limit (15% by default, changeable).
@@ -55,13 +57,13 @@ If Windows shows "Windows protected your PC" when you open the installer, click 
    Black Suit 4500
    White Suit, 3800, Plain
    ```
-   The last part is an optional group (it becomes a tab on the billing screen). Pasting a name that already exists updates its price.
+   With the cost price after the price: `Navy Blue Suit, 4000, 2800`. The last part is an optional group (it becomes a tab on the billing screen): `White Suit, 3800, 2500, Plain`. Pasting a name that already exists updates its price.
 3. Use **Add a suit** or **Edit** for single changes. A price change affects new bills only; old bills keep the price they were sold at. Switch a suit off instead of deleting it.
 
 ## 5. Daily use
 
 1. Open the program. Log in.
-2. Tap suits, choose a discount if needed, choose the payment method, enter the amount received (or press **Exact**), and press **Save and print**.
+2. Tap suits, choose a discount if needed, choose the payment method, enter the amount received (or press **Exact**), and press **Save and print**. For a customer who will pay later, choose **Udhaar** instead of Paid in full.
 3. The saved box shows the change to return. Press Enter or **New bill** for the next customer.
 4. If the printer fails, the bill is already saved. Press **Try printing again**. A bill can never be saved twice by pressing the button twice.
 5. A wrong bill: open **Bills**, pick it, **Cancel this bill**, write the reason (owner only). It stays in the records, marked cancelled, and is not counted in sales.
@@ -80,13 +82,13 @@ If Windows shows "Windows protected your PC" when you open the installer, click 
 
 ## 7. Staff and passwords
 
-Settings, **People who can log in**: add staff (name, username, password), give a new password, or switch a person off. Staff see only New bill, Bills and Prices.
+Settings, **People who can log in**: add staff (name, username, password), give a new password, or switch a person off. Staff see only New bill, Bills and Prices. They can make an udhaar bill at the counter but cannot see the Udhaar tab, any cost or any profit.
 
 ## 8. What has and has not been tested
 
 Tested by the developer's tools (all passing):
-- 35 automatic checks of the money and billing rules: totals, percent and rupee discounts (including rounding), change, cash and wallet rules, double-press protection, bill numbers never repeating, cancel rules, owner-only actions, staff discount limit, search, monthly comparison, backups, damaged-file recovery, receipt contents.
-- 46 on-screen checks that click through the real screens in a browser: first-time set-up, pasting suits, tap-to-add billing, 10% discount example, change, saved box, printer-offline recovery, bills search, reprint marked duplicate, cancel, hidden sales and eye button, staff limits, settings.
+- 53 automatic checks of the money and billing rules, including cost, profit and udhaar: totals, percent and rupee discounts (including rounding), change, cash and wallet rules, double-press protection, bill numbers never repeating, cancel rules, owner-only actions, staff discount limit, search, monthly comparison, backups, damaged-file recovery, receipt contents.
+- 63 on-screen checks that click through the real screens in a browser: first-time set-up, pasting suits, tap-to-add billing, 10% discount example, change, saved box, printer-offline recovery, bills search, reprint marked duplicate, cancel, hidden sales and eye button, staff limits, settings.
 
 **Not yet tested (needs the real shop PC):**
 - Opening as a Windows program (the installer, desktop icon, window).
@@ -97,4 +99,4 @@ Tested by the developer's tools (all passing):
 - Money is in whole rupees only. Percent discounts are rounded to the nearest rupee (half rounds up).
 - Data lives on this one PC. Keep the USB backup going. There is no phone or remote view.
 - To update the program later, run a new installer over the old one. Data is kept.
-- Not included in this version (can be added): stock counting, udhaar (credit) accounts, returns and exchange, hold bill, day-closing cash check, expenses.
+- Not included in this version (can be added): stock counting, returns and exchange, hold bill, day-closing cash check, expenses, a printed slip for money received back on udhaar.
