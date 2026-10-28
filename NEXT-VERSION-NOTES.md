@@ -29,3 +29,31 @@ Current released version: build-7/build-8 (see GitHub Releases). Receipt, tabs, 
 - Inventory scope: stock count per suit, low-stock warning, stock reduces on each sale?
 - Printer: owner's printer is a "Sonic" USB thermal printer. Windows shows only Fax. Driver not installed yet. Model number from the sticker still needed. Receipt does not print until the driver is installed.
 - Udhaar and profit work as agreed (receipt never shows udhaar or customer).
+
+## Reference material received (friend's shop POS and printed bill)
+Use the STRUCTURE and ideas only. Do NOT copy the other shop's name, logo, email or wording ("ZYRO"). Use Bin Saad Fabrics.
+
+### Friend's printed bill (layout, top to bottom)
+- Top row: date and time on the left, the word SALES on the right.
+- Logo, big brand name, a rule, shop name, address, then email | phone.
+- Block with labels on the left and values on the right: SOLD TO (Walk-in Customer, or the customer's name), DATE, INVOICE (format like 993-SQTC: number, dash, 4 letters).
+- Table header: Qty | Item | Price, with rules above and below.
+- Each item: qty, item name, a second small line with variant (size / colour), price on the right.
+- Banner between dotted lines: "1 ITEM SOLD".
+- Subtotal, Discount (10%) shown as -Rs 150, then TOTAL DUE in large bold between dashed lines, then PAYMENT MODE: CASH.
+- Footer: thank-you line in capitals, and a small line "Exchange possible within 3 days with receipt."
+- The friend's bill does not show udhaar. Bin Saad receipts must still never show udhaar.
+- The bill shows "Rs 1,499" style (Rs, space, number) and rounds 10% of 1,499 to 150 (half up, same as our rule).
+
+### Friend's software (dark theme POS, laptop screenshot)
+- Dark, left side menu with: Dashboard, Product List, (category tabs like Winter Collection, Accessories), Sales Analytics, Admin Ledger, Website Track, Checkout, Receipts Vault, Settings, Logout (shows "Admin Session").
+- Checkout / "Terminal" screen: search products at the top, grid of product cards. Each card: name, category line, colour dropdown, size dropdown showing stock (for example "Size M (4 Stock)" or "Out of Stock"), price, an "Add to Order" button.
+- Receipts Vault = a place to find old receipts (like our Bills tab).
+- Ideas to take: separate Inventory/Product List tab, separate Checkout tab, stock shown on each product, Out of Stock marking, a Dashboard, a Ledger.
+
+### Questions still open
+- Do the suits have sizes or colours as variants, or is each colour its own suit name?
+- Dark theme like the friend's, or keep the current quiet light theme? (Earlier rule: the screen must not be easy for customers to read.)
+- Return/exchange policy line on the bill (how many days)?
+- Invoice number format: simple running number (0001) or like 993-SQTC?
+- Printing now works on the owner's printer (our receipts were printed and seen in a photo). 58 mm receipt sits to one side and must be centred.
