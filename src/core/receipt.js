@@ -26,93 +26,103 @@ function timeOnly(iso) {
   return `${h}:${pad2(d.getMinutes())} ${ap}`;
 }
 
+const rs = (n) => 'Rs ' + fmt(n);
+
 function discountLabel(bill) {
   if (bill.discountType === 'pct') return `Discount (${Number(bill.discountValue)}%)`;
   return 'Discount';
 }
 
 // opts: { duplicate: boolean, test: boolean }
+// Layout: date and SALES on top, shop details, a SOLD TO / DATE / INVOICE block, a Qty / Item / Price table,
+// "N ITEMS SOLD", subtotal, discount, TOTAL DUE, payment mode, thank-you and the exchange line.
+// It never prints the customer's name or phone, who served, or anything about udhaar.
 function buildReceiptHtml(bill, settings, opts = {}) {
-  const width = settings.paperWidthMm === 58 ? 48 : 72; // printable width in mm
   const narrow = settings.paperWidthMm === 58;
+  const width = narrow ? 48 : 72; // printable width in mm; the page is centred on the paper
+  const shift = Number(settings.receiptOffsetMm) || 0;
   const row = (l, r, cls) => `<div class="row ${cls || ''}"><span>${l}</span><span>${r}</span></div>`;
-  const lines = bill.lines
-    .map((l, i) => `<div class="item"><div class="name"><span class="no">${i + 1}</span>${esc(l.name)}</div>${row(`<span class="q">${l.qty} &times; Rs. ${fmt(l.price)}</span>`, 'Rs. ' + fmt(l.amount), 'amt')}</div>`)
+  const invoice = bill.invoice || ((settings.invoicePrefix ? settings.invoicePrefix + '-' : '') + String(bill.no).padStart(4, '0'));
+  const items = bill.lines
+    .map((l) => `<div class="item"><div class="q">${l.qty}</div><div class="n"><b>${esc(l.name)}</b>${l.qty > 1 ? `<div class="each">${rs(l.price)} each</div>` : ''}</div><div class="p">${rs(l.amount)}</div></div>`)
     .join('');
-  const contact = [settings.phone && 'Ph: ' + esc(settings.phone), settings.whatsapp && 'WhatsApp: ' + esc(settings.whatsapp)]
-    .filter(Boolean)
-    .map((t) => `<div class="small">${t}</div>`)
-    .join('');
+  const phones = [settings.phone, settings.whatsapp && settings.whatsapp !== settings.phone ? 'WhatsApp ' + settings.whatsapp : '']
+    .filter(Boolean).map(esc).join(' &nbsp;|&nbsp; ');
   const isCash = String(bill.method).toLowerCase() === 'cash';
   const due = bill.due || 0; // udhaar is kept in the program's own khata and is never printed on the receipt
-  const suitCount = bill.lines.reduce((n, l) => n + l.qty, 0);
-
+  const count = bill.lines.reduce((n, l) => n + l.qty, 0);
   const payBlock = due > 0
     ? ''
-    : `<div class="pay">${row('Paid by', esc(bill.method))}${isCash ? row('Received', fmt(bill.received)) + row('Change', fmt(bill.change)) : ''}</div>`;
+    : `<div class="pay">${row('PAYMENT MODE:', '<b>' + esc(String(bill.method).toUpperCase()) + '</b>')}${isCash ? row('Received', rs(bill.received), 'small') + row('Change', rs(bill.change), 'small') : ''}</div><div class="dash"></div>`;
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Bill ${bill.no}</title><style>
 @page { margin: 0; }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: #fff; }
-body { width: ${width}mm; padding: 3mm 1.5mm 5mm; font-family: "Segoe UI", Arial, sans-serif; font-size: 12px; line-height: 1.4; color: #000; }
+body { width: ${width}mm; margin: 0 auto; position: relative; left: ${shift}mm; padding: 3mm 1.5mm 6mm; font-family: "Segoe UI", Arial, sans-serif; font-size: 12px; line-height: 1.35; color: #000; }
 .center { text-align: center; }
-.shop { font-size: ${narrow ? 17 : 21}px; font-weight: 800; letter-spacing: ${narrow ? 1.5 : 3}px; margin: 2px 0 1px; line-height: 1.15; }
-.small { font-size: 11px; }
+.top { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: .5px; margin-bottom: 5px; }
+.top b { letter-spacing: 2px; }
 .logo { max-width: 40mm; max-height: 22mm; margin: 0 auto 3px; display: block; }
-.qr { width: 28mm; height: 28mm; margin: 5px auto 0; display: block; }
-.thin { border-top: 1px solid #000; margin: 5px 0; }
+.shop { font-size: ${narrow ? 18 : 24}px; font-weight: 800; letter-spacing: ${narrow ? 2 : 4}px; line-height: 1.1; margin: 2px 0 4px; }
+.small { font-size: 11px; }
+.solid { border-top: 2px solid #000; margin: 5px 0; }
+.thin { border-top: 1px solid #000; margin: 4px 0; }
+.dash { border-top: 1px dashed #000; margin: 5px 0; }
 .dots { border-top: 1px dotted #000; margin: 4px 0; }
-.orn { display: flex; align-items: center; gap: 6px; margin: 6px 0; font-size: 9px; }
-.orn.top { margin: 7px 0 4px; }
-.orn::before, .orn::after { content: ""; flex: 1; border-top: 1px solid #000; }
-.title { text-align: center; font-size: 10.5px; font-weight: 700; letter-spacing: 6px; margin: 0 0 3px; }
-.row { display: flex; justify-content: space-between; gap: 6px; }
+.info { margin: 6px 0 4px; }
+.info .row span:first-child { font-weight: 800; font-size: 11px; letter-spacing: .5px; }
+.row { display: flex; justify-content: space-between; gap: 8px; }
 .row > span:last-child { text-align: right; white-space: nowrap; }
-.band { display: flex; justify-content: space-between; align-items: flex-end; padding: 3px 1px; }
-.band i { display: block; font-style: normal; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: #333; }
-.band b { font-size: 15px; letter-spacing: 1px; }
-.band .r { text-align: right; }
-.no { display: inline-block; min-width: 14px; font-size: 10px; font-weight: 700; margin-right: 4px; border: 1px solid #000; border-radius: 50%; text-align: center; line-height: 13px; height: 14px; padding: 0 2px; }
-.item { margin: 4px 0; padding-bottom: 3px; border-bottom: 1px dotted #777; }
-.item:last-child { border-bottom: 0; }
-.name { font-weight: 700; font-size: 12.5px; }
-.q { font-size: 11px; }
-.amt > span:last-child { font-weight: 700; }
-.totalbox { border: 2px solid #000; padding: 4px 7px; margin: 6px 0 4px; display: flex; justify-content: space-between; align-items: baseline; font-weight: 800; }
-.totalbox span { font-size: ${narrow ? 10.5 : 12}px; letter-spacing: ${narrow ? 1.5 : 3}px; }
-.totalbox b { font-size: ${narrow ? 16 : 23}px; white-space: nowrap; }
-.saved { text-align: center; font-size: 10.5px; letter-spacing: 1px; margin: 2px 0 4px; }
-.pay { margin-top: 3px; }
-.thanks { font-size: 12px; font-weight: 600; letter-spacing: 1.5px; margin-top: 2px; }
+.row.small { font-size: 11px; }
+.head { display: grid; grid-template-columns: ${narrow ? 22 : 28}px 1fr auto; gap: 6px; font-weight: 800; font-size: 12px; padding: 3px 0; border-top: 2px solid #000; border-bottom: 2px solid #000; margin-top: 6px; }
+.head span:last-child { text-align: right; }
+.item { display: grid; grid-template-columns: ${narrow ? 22 : 28}px 1fr auto; gap: 6px; padding: 5px 0 4px; border-bottom: 1px dotted #000; }
+.item .q { font-weight: 700; }
+.item .n b { font-size: 12.5px; }
+.item .each { font-size: 10.5px; }
+.item .p { font-weight: 700; white-space: nowrap; text-align: right; }
+.sold { text-align: center; font-weight: 800; font-size: 12px; letter-spacing: 1.5px; padding: 4px 0; border-bottom: 2px solid #000; margin-bottom: 4px; }
+.sums .row { padding: 1px 0; font-size: 12px; }
+.due { display: flex; justify-content: space-between; align-items: baseline; font-weight: 800; padding: 3px 0 2px; margin: 4px 0 0; border-top: 1px dashed #000; border-bottom: 1px dashed #000; }
+.due span { font-size: ${narrow ? 10.5 : 14}px; letter-spacing: ${narrow ? 0 : .5}px; white-space: nowrap; }
+.due b { font-size: ${narrow ? 16 : 22}px; white-space: nowrap; }
+.pay { margin-top: 3px; font-size: ${narrow ? 10.5 : 12}px; }
+.pay .row span:first-child { white-space: nowrap; }
+.thanks { font-weight: 800; font-size: 11.5px; letter-spacing: 1px; text-transform: uppercase; margin-top: 3px; }
+.exch { font-size: 10.5px; margin-top: 2px; }
+.qr { width: 28mm; height: 28mm; margin: 6px auto 0; display: block; }
 .stamp { text-align: center; font-weight: 800; font-size: 13px; border: 2px solid #000; padding: 2px 0; margin: 0 0 6px; letter-spacing: 4px; }
 </style></head><body>
 ${opts.duplicate ? '<div class="stamp">DUPLICATE</div>' : ''}
 ${opts.test ? '<div class="stamp">TEST PRINT</div>' : ''}
+<div class="top"><span>${dateOnly(bill.createdAt)}, ${timeOnly(bill.createdAt)}</span><b>SALES</b></div>
 <div class="center">
 ${settings.logo ? `<img class="logo" src="${esc(settings.logo)}" alt="">` : ''}
 <div class="shop">${esc(String(settings.shopName).toUpperCase())}</div>
+</div>
+<div class="solid"></div>
+<div class="center">
 ${settings.address ? `<div class="small">${esc(settings.address)}</div>` : ''}
-${contact}
+${phones ? `<div class="small">${phones}</div>` : ''}
 </div>
-<div class="orn top">&#9670;</div>
-<div class="title">RECEIPT</div>
-<div class="band">
-<div><i>Bill No.</i><b>${String(bill.no).padStart(4, '0')}</b></div>
-<div class="r"><i>${dateOnly(bill.createdAt)}</i><b>${timeOnly(bill.createdAt)}</b></div>
+<div class="info">
+${row('SOLD TO:', 'Walk-in Customer')}
+${row('DATE:', dateOnly(bill.createdAt))}
+${row('INVOICE:', '<b>' + esc(invoice) + '</b>')}
 </div>
-<div class="thin"></div>
-${lines}
-<div class="thin"></div>
-${row('Items', suitCount + (suitCount === 1 ? ' suit' : ' suits'))}
-${row('Subtotal', fmt(bill.subtotal))}
-${bill.discount > 0 ? row(discountLabel(bill), '-' + fmt(bill.discount)) : ''}
-<div class="totalbox"><span>TOTAL</span><b>Rs. ${fmt(bill.total)}</b></div>
-${bill.discount > 0 ? `<div class="saved">You saved Rs. ${fmt(bill.discount)}</div>` : ''}
+<div class="head"><span>Qty</span><span>Item</span><span>Price</span></div>
+${items}
+<div class="sold">${count} ${count === 1 ? 'ITEM' : 'ITEMS'} SOLD</div>
+<div class="sums">
+${row('Subtotal:', rs(bill.subtotal))}
+${bill.discount > 0 ? row(discountLabel(bill) + ':', '-' + rs(bill.discount)) : ''}
+</div>
+<div class="due"><span>TOTAL DUE:</span><b>${rs(bill.total)}</b></div>
 ${payBlock}
-<div class="orn">&#9670;</div>
 <div class="center">
 <div class="thanks">${esc(settings.footer || 'Thank you for shopping with us')}</div>
+${settings.exchangeNote ? `<div class="exch">${esc(settings.exchangeNote)}</div>` : ''}
 ${settings.qr ? `<img class="qr" src="${esc(settings.qr)}" alt="">${settings.whatsapp ? '<div class="small">Scan to chat on WhatsApp</div>' : ''}` : ''}
 </div>
 </body></html>`;
@@ -122,6 +132,7 @@ ${settings.qr ? `<img class="qr" src="${esc(settings.qr)}" alt="">${settings.wha
 function sampleBill(now = new Date()) {
   return {
     no: 0,
+    invoice: 'BS-0000',
     createdAt: now.toISOString(),
     cashier: 'Test',
     customerName: '',

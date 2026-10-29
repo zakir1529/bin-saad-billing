@@ -9,6 +9,7 @@ const os = require('os');
 const { Store } = require('../src/core/store');
 const { Service } = require('../src/core/service');
 const { buildReceiptHtml, sampleBill } = require('../src/core/receipt');
+const { buildDayReportHtml } = require('../src/core/report');
 
 const PORT = Number(process.env.PORT || 8765);
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bs-harness-'));
@@ -16,6 +17,7 @@ const store = new Store(path.join(dir, 'data.json'));
 const service = new Service({ store });
 const printed = [];
 let failPrint = false;
+let lastReport = 'none';
 
 const settings = () => service.getSettings();
 const EXTRA = {
@@ -31,6 +33,12 @@ const EXTRA = {
     return buildReceiptHtml(bill, settings(), { duplicate: bill.printCount > 0 });
   },
   exportReceiptPdf() { return { file: 'C:\\Users\\Shop\\Documents\\Bin Saad Receipts\\Bill.pdf' }; },
+  dailyReportPdf(dateKey) {
+    service._requireOwner();
+    const report = service.dailyReport(dateKey);
+    lastReport = buildDayReportHtml(report, service.searchBills({ from: report.dateKey, to: report.dateKey, limit: 500 }), settings());
+    return { file: 'C:\\Users\\Shop\\Documents\\Bin Saad Reports\\Sales-' + report.dateKey + '.pdf' };
+  },
   testPrint() { printed.push({ id: 0, no: 0, html: 'test' }); return { printed: true }; },
   testReceiptHtml() { return buildReceiptHtml(sampleBill(), settings(), { test: true }); },
   listPrinters() { return [{ name: 'POS-80', displayName: 'POS-80 Thermal Printer', isDefault: true }, { name: 'Office', displayName: 'Office Laser', isDefault: false }]; },
@@ -82,6 +90,7 @@ http.createServer((req, res) => {
     res.end(printed[n] ? printed[n].html : 'none');
     return;
   }
+  if (url === '/__report') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(lastReport); return; }
   if (url === '/__failprint') { failPrint = req.url.includes('on=1'); res.end('ok'); return; }
   if (url === '/__shim.js') { res.writeHead(200, { 'Content-Type': 'text/javascript' }); res.end(SHIM); return; }
   if (url === '/' || url === '/index.html') {

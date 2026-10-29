@@ -5,9 +5,6 @@ on:
   push:
     branches: [main, master]
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: windows-latest
@@ -28,11 +25,3 @@ jobs:
         with:
           name: Bin-Saad-Billing-Setup
           path: dist/*.exe
-      - name: Publish the files as a release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = "build-${{ github.run_number }}"
-          Get-ChildItem dist -Filter *.exe | ForEach-Object { Write-Host $_.Name ($_.Length) }
-          gh release create $tag (Get-ChildItem dist -Filter *.exe | ForEach-Object { $_.FullName }) --title "Bin Saad Billing $tag" --notes "Setup installer and portable version. Run the Setup file to install, or the portable file to run without installing." --latest

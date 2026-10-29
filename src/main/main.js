@@ -8,6 +8,7 @@ const { Store } = require('../core/store');
 const { Service, formatBillNo } = require('../core/service');
 const { UserError } = require('../core/errors');
 const { buildReceiptHtml, sampleBill } = require('../core/receipt');
+const { buildDayReportHtml } = require('../core/report');
 
 let mainWindow = null;
 let store = null;
@@ -15,7 +16,20 @@ let service = null;
 let lastBackup = { ok: null, at: null, error: '', target: '' };
 let backupTimer = null;
 
-const MUTATING = new Set(['createBill', 'cancelBill', 'saveSuit', 'importSuits', 'saveUser', 'saveSettings', 'setupOwner', 'changePassword', 'receiveUdhaar']);
+const MUTATING = new Set(['createBill', 'cancelBill', 'saveSuit', 'importSuits', 'saveUser', 'saveSettings', 'setupOwner', 'changePassword', 'receiveUdhaar', 'addStock', 'importStock', 'createRecoveryCode', 'resetWithRecovery']);
+
+// ---------- a small log file, and nothing is allowed to crash the program ----------
+function logLine(text) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'app.log');
+    if (fs.existsSync(file) && fs.statSync(file).size > 1000000) fs.renameSync(file, file + '.old');
+    fs.appendFileSync(file, `${new Date().toISOString()} ${text}\n`);
+  } catch (e) { /* logging must never cause a problem of its own */ }
+}
+process.on('uncaughtException', (e) => logLine('uncaughtException: ' + (e && e.stack ? e.stack : e)));
+process.on('unhandledRejection', (e) => logLine('unhandledRejection: ' + (e && e.stack ? e.stack : e)));
 
 // ---------- start-up ----------
 if (!app.requestSingleInstanceLock()) {
@@ -53,7 +67,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 650,
     title: 'Bin Saad Billing',
-    backgroundColor: '#ECEAE6',
+    backgroundColor: '#14161a',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -66,6 +80,17 @@ function createWindow() {
     mainWindow.maximize();
     mainWindow.show();
   });
+  // If the screen ever freezes or crashes, bring it straight back. Saved bills are on disk, so nothing is lost.
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    logLine('render-process-gone: ' + JSON.stringify(details));
+    if (mainWindow) setTimeout(() => { try { mainWindow.webContents.reload(); } catch (e) { logLine('reload failed: ' + e); } }, 500);
+  });
+  mainWindow.webContents.on('unresponsive', () => logLine('window unresponsive'));
+  mainWindow.webContents.on('responsive', () => logLine('window responsive again'));
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
+    logLine(`did-fail-load ${code} ${desc}`);
+    setTimeout(() => { try { if (mainWindow) mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html')); } catch (e) { /* ignore */ } }, 1000);
+  });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
@@ -74,6 +99,7 @@ function createWindow() {
   });
 }
 
+app.on('before-quit', () => { runBackup(); });
 app.on('window-all-closed', () => {
   runBackup(); // a last copy of the data when the program is closed
   app.quit();
@@ -177,6 +203,31 @@ const EXTRA = {
       const dir = path.join(app.getPath('documents'), 'Bin Saad Receipts');
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, `Bill-${formatBillNo(bill.no)}.pdf`);
+      fs.writeFileSync(file, pdf);
+      shell.showItemInFolder(file);
+      return { file };
+    } finally {
+      win.destroy();
+    }
+  },
+
+  // The day's sales as an A4 PDF in Documents\Bin Saad Reports. Owner only.
+  async dailyReportPdf(dateKey) {
+    service._requireOwner();
+    const report = service.dailyReport(dateKey);
+    const bills = service.searchBills({ from: report.dateKey, to: report.dateKey, limit: 500 });
+    const html = buildDayReportHtml(report, bills, service.getSettings());
+    const tmpDir = path.join(app.getPath('userData'), 'tmp');
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const tmp = path.join(tmpDir, 'day-report.html');
+    fs.writeFileSync(tmp, html, 'utf8');
+    const win = new BrowserWindow({ show: false, width: 900, height: 1200, webPreferences: { sandbox: true, contextIsolation: true } });
+    try {
+      await win.loadFile(tmp);
+      const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { marginType: 'default' } });
+      const dir = path.join(app.getPath('documents'), 'Bin Saad Reports');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `Sales-${report.dateKey}.pdf`);
       fs.writeFileSync(file, pdf);
       shell.showItemInFolder(file);
       return { file };

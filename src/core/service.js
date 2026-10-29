@@ -10,6 +10,7 @@ const PUBLIC_METHODS = [
   'listSuits', 'saveSuit', 'importSuits', 'createBill', 'getBill', 'searchBills', 'cancelBill',
   'dailyReport', 'monthlyReport', 'verifyPassword', 'listUsers', 'saveUser', 'changePassword', 'auditLog',
   'profitReport', 'listUdhaar', 'udhaarCustomer', 'receiveUdhaar',
+  'addStock', 'importStock', 'listStockLog', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
 ];
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -37,6 +38,23 @@ function newCredentials(password) {
 
 function formatBillNo(n) {
   return String(n).padStart(4, '0');
+}
+
+// BS-0042: a short running number that never repeats. The prefix can be changed in Settings.
+function invoiceOf(prefix, n) {
+  const p = String(prefix || '').trim();
+  return (p ? p + '-' : '') + formatBillNo(n);
+}
+
+// Recovery code: 16 letters and digits without look-alike characters, shown as XXXX-XXXX-XXXX-XXXX.
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function makeRecoveryCode() {
+  let raw = '';
+  for (let i = 0; i < 16; i++) raw += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
+  return raw.match(/.{4}/g).join('-');
+}
+function normaliseCode(code) {
+  return String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 // A phone number as digits only, so 0300-1234567 and +92 300 1234567 are the same customer.
@@ -140,6 +158,7 @@ class Service {
       needsSetup: this.d.users.length === 0,
       user: this._pub(this._user()),
       shopName: this.d.settings.shopName,
+      hasRecovery: !!this.d.recovery,
     };
   }
 
@@ -157,7 +176,13 @@ class Service {
   }
 
   login(username, password) {
-    const u = this.d.users.find((x) => x.active && x.username.toLowerCase() === String(username || '').trim().toLowerCase());
+    const wanted = String(username || '').trim().toLowerCase();
+    let u = this.d.users.find((x) => x.active && x.username.toLowerCase() === wanted);
+    if (!u && wanted) {
+      // the person's own name works too, when it is not shared with anyone else
+      const byName = this.d.users.filter((x) => x.active && x.name.trim().toLowerCase() === wanted);
+      if (byName.length === 1) u = byName[0];
+    }
     if (!u || !checkPassword(u, password)) throw new UserError('Wrong username or password.');
     this.userId = u.id;
     return this._pub(u);
@@ -197,13 +222,28 @@ class Service {
     const text = (k, max) => {
       if (patch[k] !== undefined) s[k] = String(patch[k]).trim().slice(0, max);
     };
-    text('shopName', 80); text('address', 160); text('phone', 40); text('whatsapp', 40); text('footer', 120);
+    text('shopName', 80); text('address', 160); text('phone', 40); text('whatsapp', 40); text('footer', 120); text('exchangeNote', 120);
     text('printerName', 200); text('backupDir', 400);
     if (patch.shopName !== undefined && !s.shopName) throw new UserError('Shop name cannot be empty.');
     if (patch.paperWidthMm !== undefined) {
       const w = Number(patch.paperWidthMm);
       if (w !== 58 && w !== 80) throw new UserError('Paper width must be 58 or 80 mm.');
       s.paperWidthMm = w;
+    }
+    if (patch.invoicePrefix !== undefined) {
+      const pre = String(patch.invoicePrefix).trim().toUpperCase();
+      if (!/^[A-Z0-9]{0,4}$/.test(pre)) throw new UserError('The invoice letters can be up to 4 letters or numbers.');
+      s.invoicePrefix = pre;
+    }
+    if (patch.lowStockAt !== undefined) {
+      const v = Number(patch.lowStockAt);
+      if (!Number.isInteger(v) || v < 0 || v > 999) throw new UserError('Low stock level must be a whole number from 0 to 999.');
+      s.lowStockAt = v;
+    }
+    if (patch.receiptOffsetMm !== undefined) {
+      const v = Number(patch.receiptOffsetMm);
+      if (!Number.isInteger(v) || v < -10 || v > 10) throw new UserError('Receipt shift must be a whole number from -10 to 10 mm.');
+      s.receiptOffsetMm = v;
     }
     if (patch.silentPrint !== undefined) s.silentPrint = !!patch.silentPrint;
     if (patch.revealNeedsPassword !== undefined) s.revealNeedsPassword = !!patch.revealNeedsPassword;
@@ -274,6 +314,7 @@ class Service {
     const u = this._requireUser();
     const all = includeInactive && u.role === 'owner';
     const list = clone(this.d.suits.filter((s) => all || s.active)).sort((a, b) => a.name.localeCompare(b.name));
+    for (const s of list) if (s.stock === undefined) s.stock = null; // null = this suit is not being counted
     if (u.role !== 'owner') for (const s of list) delete s.cost; // staff never see what a suit costs the shop
     return list;
   }
@@ -289,7 +330,15 @@ class Service {
       cost = Number(input.cost);
       if (!Number.isInteger(cost) || cost < 0 || cost > MAX_PRICE) throw new UserError('Cost must be a whole number of rupees (or leave it empty).');
     }
-    return { name, price, cost, group: String(input.group || '').trim().slice(0, 30) };
+    let stock;
+    if (input.stock !== undefined) {
+      if (input.stock === null || input.stock === '') stock = null;
+      else {
+        stock = Number(input.stock);
+        if (!Number.isInteger(stock) || stock < 0 || stock > 99999) throw new UserError('Stock must be a whole number (or leave it empty to not count this suit).');
+      }
+    }
+    return { name, price, cost, stock, group: String(input.group || '').trim().slice(0, 30) };
   }
 
   saveSuit(input = {}) {
@@ -306,7 +355,14 @@ class Service {
         d.suits.push(s);
       }
       const before = existing ? `${s.name} ${s.price}${s.cost === null || s.cost === undefined ? '' : ' cost ' + s.cost}` : '';
-      Object.assign(s, v);
+      const oldStock = existing ? (s.stock === undefined ? null : s.stock) : null;
+      const { stock: newStock, ...rest } = v;
+      Object.assign(s, rest);
+      if (s.stock === undefined) s.stock = null;
+      if (newStock !== undefined) {
+        s.stock = newStock;
+        if (newStock !== null && newStock !== oldStock) this._logStock(d, s, newStock - (oldStock || 0), existing ? 'Count corrected' : 'Opening stock', u);
+      }
       if (input.active !== undefined) s.active = !!input.active;
       this._audit(u, existing ? 'suit-edit' : 'suit-add', `${before ? before + ' -> ' : ''}${s.name} ${s.price}${s.cost === null ? '' : ' cost ' + s.cost}${s.active ? '' : ' (off)'}`);
       return clone(s);
@@ -329,7 +385,7 @@ class Service {
           s.active = true;
           updated++;
         } else {
-          d.suits.push({ id: ++d.counters.id, name: item.name, price: item.price, cost: item.cost, group: item.group, active: true });
+          d.suits.push({ id: ++d.counters.id, name: item.name, price: item.price, cost: item.cost, stock: null, group: item.group, active: true });
           added++;
         }
       }
@@ -361,6 +417,11 @@ class Service {
       if (!Number.isInteger(qty) || qty < 1) throw new UserError('Quantity must be a whole number, 1 or more.');
       const prev = merged.get(suit.id);
       merged.set(suit.id, { suit, qty: (prev ? prev.qty : 0) + qty });
+    }
+    for (const { suit, qty } of merged.values()) {
+      if (suit.stock !== null && suit.stock !== undefined && qty > suit.stock) {
+        throw new UserError(suit.stock === 0 ? `${suit.name} is out of stock.` : `Only ${suit.stock} of ${suit.name} left in stock.`);
+      }
     }
     const lines = [...merged.values()].map(({ suit, qty }) => ({
       suitId: suit.id, name: suit.name, price: suit.price, cost: suit.cost === undefined ? null : suit.cost, qty,
@@ -421,6 +482,7 @@ class Service {
         id: ++d.counters.id,
         uid,
         no,
+        invoice: invoiceOf(settings.invoicePrefix, no),
         createdAt: now.toISOString(),
         dateKey: dateKeyOf(now),
         cashier: user.name,
@@ -444,6 +506,13 @@ class Service {
         printCount: 0,
       };
       d.bills.push(bill);
+      for (const l of lineRows) {
+        const suit = d.suits.find((x) => x.id === l.suitId);
+        if (suit && suit.stock !== null && suit.stock !== undefined) {
+          suit.stock -= l.qty;
+          this._logStock(d, suit, -l.qty, 'Sold on ' + bill.invoice, user);
+        }
+      }
       this._audit(user, 'bill', `#${formatBillNo(no)} total ${t.total}` + (t.discount ? ` discount ${t.discount}` : '') + (due ? ` udhaar ${due} (${customerName})` : ''));
       return { bill: this._view(bill), duplicate: false };
     });
@@ -475,7 +544,14 @@ class Service {
     if (dueOf(b) > 0 && this._balanceOf(b.customerKey) - dueOf(b) < 0) {
       throw new UserError('This customer has already paid back udhaar that includes this bill, so it cannot be cancelled. Ask the developer for help.');
     }
-    return this.store.run(() => {
+    return this.store.run((d) => {
+      for (const l of b.lines) {
+        const suit = d.suits.find((x) => x.id === l.suitId);
+        if (suit && suit.stock !== null && suit.stock !== undefined) {
+          suit.stock += l.qty;
+          this._logStock(d, suit, l.qty, 'Bill ' + (b.invoice || formatBillNo(b.no)) + ' cancelled', u);
+        }
+      }
       b.status = 'cancelled';
       b.cancelledAt = this.now().toISOString();
       b.cancelledBy = u.name;
@@ -501,6 +577,7 @@ class Service {
         const numeric = /^\d+$/.test(q);
         const hit =
           (numeric && b.no === parseInt(q, 10)) ||
+          (b.invoice || '').toLowerCase().includes(q) ||
           (digits.length >= 4 && (b.customerPhone || '').replace(/\D/g, '').includes(digits)) ||
           (b.customerName || '').toLowerCase().includes(q) ||
           b.lines.some((l) => l.name.toLowerCase().includes(q));
@@ -539,7 +616,8 @@ class Service {
       udhaarCollected += p.amount;
       sum.byMethod[p.method] = (sum.byMethod[p.method] || 0) + p.amount;
     }
-    return { dateKey: key, ...sum, udhaarCollected, cancelled: day.length - paid.length };
+    const payments = this.d.payments.filter((p) => p.dateKey === key).map((p) => ({ at: p.at, name: p.customerName, amount: p.amount, method: p.method }));
+    return { dateKey: key, ...sum, udhaarCollected, payments, cancelled: day.length - paid.length };
   }
 
   monthlyReport(ym) {
@@ -573,6 +651,127 @@ class Service {
       topSuits: [...suits.values()].sort((a, b) => b.qty - a.qty || b.amount - a.amount).slice(0, 10),
       prev: { ym: prevKey, sales: prev.sales, bills: prev.bills },
     };
+  }
+
+  // ---------- inventory: how many of each suit are in the shop ----------
+  _logStock(d, suit, delta, reason, user) {
+    d.stockLog.push({
+      id: ++d.counters.id,
+      at: this.now().toISOString(),
+      suitId: suit.id,
+      name: suit.name,
+      delta,
+      balance: suit.stock,
+      reason,
+      by: user ? user.name : '',
+    });
+    if (d.stockLog.length > 5000) d.stockLog.splice(0, d.stockLog.length - 5000);
+  }
+
+  // New stock arrived: adds to what is there. A suit that was not being counted starts counting from this number.
+  addStock({ suitId, qty, note } = {}) {
+    const u = this._requireOwner();
+    const suit = this.d.suits.find((x) => x.id === suitId);
+    if (!suit) throw new UserError('That suit was not found.');
+    const n = Number(qty);
+    if (!Number.isInteger(n) || n < 1 || n > 99999) throw new UserError('Enter how many came in, as a whole number.');
+    return this.store.run((d) => {
+      const s = d.suits.find((x) => x.id === suitId);
+      s.stock = (s.stock === null || s.stock === undefined ? 0 : s.stock) + n;
+      this._logStock(d, s, n, String(note || '').trim().slice(0, 80) || 'Stock in', u);
+      this._audit(u, 'stock-in', `${s.name} +${n} (now ${s.stock})`);
+      return clone(s);
+    });
+  }
+
+  // "Navy Blue Suit, 12" per line: sets the count for each suit (for the first count, or a recount).
+  importStock(text) {
+    const u = this._requireOwner();
+    const rows = [];
+    const bad = [];
+    for (const raw of String(text || '').split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      const m = line.match(/^(.+?)\s*[,;\t]\s*(\d+)\s*$/) || line.match(/^(.+\S)\s+(\d+)\s*$/);
+      if (!m || Number(m[2]) > 99999) bad.push(line);
+      else rows.push({ name: m[1].trim(), qty: Number(m[2]) });
+    }
+    return this.store.run((d) => {
+      let updated = 0;
+      const unknown = [];
+      for (const r of rows) {
+        const s = d.suits.find((x) => x.name.toLowerCase() === r.name.toLowerCase());
+        if (!s) {
+          unknown.push(r.name);
+          continue;
+        }
+        const before = s.stock === undefined ? null : s.stock;
+        s.stock = r.qty;
+        if (before !== r.qty) this._logStock(d, s, r.qty - (before || 0), before === null ? 'Opening stock' : 'Count corrected', u);
+        updated++;
+      }
+      this._audit(u, 'stock-import', `${updated} counted`);
+      return { updated, unknown, skipped: bad };
+    });
+  }
+
+  listStockLog(limit = 100) {
+    this._requireOwner();
+    return clone(this.d.stockLog.slice(-Math.min(Number(limit) || 100, 500)).reverse());
+  }
+
+  // ---------- forgot password: the recovery code ----------
+  // The code is made once, written on paper, and kept safe. Only its hash is stored here.
+  createRecoveryCode(password) {
+    const u = this._requireOwner();
+    if (!checkPassword(u, password)) throw new UserError('The password is wrong.');
+    const code = makeRecoveryCode();
+    const salt = crypto.randomBytes(16).toString('hex');
+    return this.store.run((d) => {
+      d.recovery = { salt, hash: hashPassword(normaliseCode(code), salt), createdAt: this.now().toISOString(), fails: 0, lockedUntil: null };
+      this._audit(u, 'recovery-code', 'A new recovery code was made');
+      return { code, createdAt: d.recovery.createdAt };
+    });
+  }
+
+  recoveryInfo() {
+    return { exists: !!this.d.recovery, createdAt: this.d.recovery ? this.d.recovery.createdAt : null };
+  }
+
+  // Works before logging in. Right code + new password = the owner gets in again, and a fresh code is made.
+  resetWithRecovery(code, newPassword) {
+    const rec = this.d.recovery;
+    if (!rec) throw new UserError('No recovery code was made on this computer. It can only be made while logged in as the owner.');
+    const now = this.now();
+    if (rec.lockedUntil && new Date(rec.lockedUntil) > now) {
+      const mins = Math.max(1, Math.ceil((new Date(rec.lockedUntil) - now) / 60000));
+      throw new UserError(`Too many wrong tries. Please wait ${mins} minute${mins === 1 ? '' : 's'} and try again.`);
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 4) throw new UserError('Password must be at least 4 characters.');
+    const owner = this.d.users.find((x) => x.role === 'owner' && x.active);
+    if (!owner) throw new UserError('There is no owner account to reset.');
+    const given = Buffer.from(hashPassword(normaliseCode(code), rec.salt), 'hex');
+    const real = Buffer.from(rec.hash, 'hex');
+    const good = given.length === real.length && crypto.timingSafeEqual(given, real);
+    const outcome = this.store.run((d) => {
+      if (!good) {
+        d.recovery.fails = (d.recovery.fails || 0) + 1;
+        if (d.recovery.fails >= 5) {
+          d.recovery.fails = 0;
+          d.recovery.lockedUntil = new Date(now.getTime() + 15 * 60000).toISOString();
+        }
+        return null;
+      }
+      const cred = newCredentials(newPassword);
+      Object.assign(d.users.find((x) => x.id === owner.id), cred);
+      const fresh = makeRecoveryCode();
+      const salt = crypto.randomBytes(16).toString('hex');
+      d.recovery = { salt, hash: hashPassword(normaliseCode(fresh), salt), createdAt: now.toISOString(), fails: 0, lockedUntil: null };
+      this._audit(owner, 'password-reset', 'Password reset with the recovery code');
+      return fresh;
+    });
+    if (outcome === null) throw new UserError('That recovery code is not right. Check it and try again.');
+    return { code: outcome };
   }
 
   // ---------- profit (owner only) ----------
@@ -681,7 +880,7 @@ class Service {
     if (!c) throw new UserError('This customer has no udhaar.');
     const bills = this.d.bills
       .filter((b) => b.status === 'paid' && b.customerKey === c.key && dueOf(b) > 0)
-      .map((b) => ({ id: b.id, no: b.no, createdAt: b.createdAt, total: b.total, paid: paidOf(b), due: dueOf(b) }));
+      .map((b) => ({ id: b.id, no: b.no, invoice: b.invoice, createdAt: b.createdAt, total: b.total, paid: paidOf(b), due: dueOf(b) }));
     const payments = clone(this.d.payments.filter((p) => p.customerKey === c.key));
     return { ...c, billList: bills, payments };
   }
@@ -726,4 +925,4 @@ class Service {
   }
 }
 
-module.exports = { Service, parseSuitLines, formatBillNo, dateKeyOf, PUBLIC_METHODS };
+module.exports = { Service, parseSuitLines, formatBillNo, invoiceOf, dateKeyOf, PUBLIC_METHODS };

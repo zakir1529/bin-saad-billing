@@ -30,11 +30,15 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.click('[data-act=setup]');
   check('set-up refuses two different passwords', (await text('.err')).includes('not the same'));
   await page.fill('#l-pw2', 'owner1234'); await page.click('[data-act=setup]');
+  await page.waitForSelector('.dialog .codebox');
+  const firstCode = (await text('.dialog .codebox')).trim();
+  check('first set-up shows a recovery code to write down', /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/.test(firstCode), firstCode);
+  await page.click('[data-act=modalCancel]');
   await page.waitForSelector('.shell');
   check('owner is logged in after set-up', (await text('.nav .who')).includes('Owner'));
 
   // price list: paste a list
-  await nav('prices');
+  await nav('inventory');
   await page.click('[data-act=pasteList]');
   await page.fill('#m-paste', 'Navy Blue Suit, 4000, Plain\nBlack Suit, 4000, Plain\nBottle Green Suit, 4200, Plain\nMaroon Suit, 4200, Plain\nRose Printed Suit, 4800, Printed\nSky Blue Printed Suit 4800\nbroken line without price');
   await page.click('[data-act=modalOk]');
@@ -67,14 +71,14 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await shot('05-billing-with-items');
   await page.click('[data-act=save][data-print="1"]');
   await page.waitForSelector('#newbill');
-  await page.waitForFunction(() => document.querySelector('.dialog').innerText.includes('Receipt printed'));
+  await page.waitForFunction(() => (document.querySelector('.dialog') || { innerText: '' }).innerText.includes('Receipt printed'));
   let done = await text('.dialog');
-  check('saved bill 0001: total 10,800 and big change 200', done.includes('Bill 0001 saved') && done.includes('Rs. 10,800') && done.includes('Change: Rs. 200'), done);
+  check('saved bill 0001: total 10,800 and big change 200', done.includes('Bill BS-0001 saved') && done.includes('Rs. 10,800') && done.includes('Change: Rs. 200'), done);
   await shot('06-bill-saved');
   let st = await state();
   check('exactly one bill saved and one receipt printed', st.bills === 1 && st.printed.length === 1, JSON.stringify(st));
   const receipt1 = await (await fetch(BASE + '/__printed?n=0')).text();
-  check('receipt lists items, discount line and total', ['Navy Blue Suit', 'Black Suit', 'Discount (10%)', '-1,200', 'Rs. 10,800', '2 &times; Rs. 4,000'].every((s) => receipt1.includes(s)));
+  check('receipt lists items, discount line and total', ['Navy Blue Suit', 'Black Suit', 'Discount (10%)', '-Rs 1,200', 'Rs 10,800', 'Rs 4,000 each', 'INVOICE:', 'BS-0001'].every((s) => receipt1.includes(s)));
   check('first print is not marked duplicate', !receipt1.includes('DUPLICATE</div>'));
   check('enter on the saved box starts a new bill', (await page.evaluate(() => document.activeElement.id)) === 'newbill');
   await page.keyboard.press('Enter');
@@ -107,19 +111,19 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.click('.tile:has-text("Rose Printed Suit")');
   await page.click('[data-act=exact]');
   await page.click('[data-act=save][data-print="1"]');
-  await page.waitForFunction(() => document.querySelector('.dialog') && document.querySelector('.dialog').innerText.includes('did not print'));
+  await page.waitForFunction(() => document.querySelector('.dialog') && (document.querySelector('.dialog') || { innerText: '' }).innerText.includes('did not print'));
   await shot('07-print-failed');
   st = await state();
   check('printer offline: bill is saved anyway (3 bills)', st.bills === 3, JSON.stringify(st));
   await fetch(BASE + '/__failprint?on=0');
   await page.click('[data-act=printAgain]');
-  await page.waitForFunction(() => document.querySelector('.dialog').innerText.includes('Receipt printed'));
+  await page.waitForFunction(() => (document.querySelector('.dialog') || { innerText: '' }).innerText.includes('Receipt printed'));
   check('retry prints the same bill without making a new one', (await state()).bills === 3);
   await page.keyboard.press('Enter');
 
   // bills page
   await nav('bills');
-  check('bills list has 3 bills, newest first', (await page.locator('tbody tr.click').count()) === 3 && (await text('tbody tr.click')).startsWith('0003'));
+  check('bills list has 3 bills, newest first', (await page.locator('tbody tr.click').count()) === 3 && (await text('tbody tr.click')).startsWith('BS-0003'));
   await page.fill('#bq', 'imran');
   await page.waitForTimeout(500);
   check('search by customer name finds bill 0002', (await page.locator('tbody tr.click').count()) === 1 && (await text('tbody tr.click')).includes('0002'));
@@ -193,10 +197,10 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
 
   // ---------- cost price, udhaar and profit: each in its own tab ----------
   const navAll = await text('.nav');
-  check('left menu has separate tabs: New bill, Bills, Price list, Udhaar, Profit, Sales, Settings',
-    ['New bill', 'Bills', 'Price list', 'Udhaar', 'Profit', 'Sales', 'Settings'].every((t) => navAll.includes(t)), navAll);
+  check('left menu has separate tabs: Checkout, Inventory, Bills, Udhaar, Profit, Sales, Settings',
+    ['Checkout', 'Inventory', 'Bills', 'Udhaar', 'Profit', 'Sales', 'Settings'].every((t) => navAll.includes(t)), navAll);
 
-  await nav('prices');
+  await nav('inventory');
   check('price list hides cost and profit until the eye is clicked', !/Rs\. 3,000/.test(await text('.content')) && (await text('.content')).includes('not set'));
   await page.click('tr:has-text("Maroon Suit") [data-act=editSuit]');
   await page.fill('#m-cost', '3000');
@@ -225,11 +229,11 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.click('[data-act=credit][data-v="1"]');
   await page.fill('#cname', 'Imran Khan'); await page.fill('#cphone', '+92 300 1234567');
   await page.click('[data-act=save][data-print="1"]');
-  await page.waitForFunction(() => document.querySelector('.dialog').innerText.includes('Receipt printed'));
+  await page.waitForFunction(() => (document.querySelector('.dialog') || { innerText: '' }).innerText.includes('Receipt printed'));
   const stU = await state();
   const udReceipt = await (await fetch(BASE + '/__printed?n=' + (stU.printed.length - 1))).text();
   check('printed udhaar receipt has no customer, no phone, no udhaar and no "Served by"',
-    !['Imran', '1234567', 'Udhaar', 'UDHAAR', 'Balance', 'Served', 'Paid now'].some((w) => udReceipt.includes(w)) && udReceipt.includes('Rs. 4,200'));
+    !['Imran', '1234567', 'Udhaar', 'UDHAAR', 'Balance', 'Served', 'Paid now'].some((w) => udReceipt.includes(w)) && udReceipt.includes('Rs 4,200'));
   await page.click('#newbill');
 
   await nav('udhaar');
@@ -256,8 +260,8 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   const pHidden = await text('.content');
   check('profit tab shows no money while hidden', !/Rs\. \d/.test(pHidden) && pHidden.includes('•'), pHidden.slice(0, 200));
   await page.click('.content [data-act=eye]');
-  await page.fill('#m-pw', 'owner1234');
-  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  if (await page.$('#m-pw')) { await page.fill('#m-pw', 'owner1234'); await page.keyboard.press('Enter'); }
   await page.waitForFunction(() => /Rs\. \d/.test(document.querySelector('.content').innerText));
   const pTxt = await text('.content');
   // two Maroon udhaar bills: sales 8,400, cost 6,000, profit 2,400. Two older bills had no cost and are left out.
@@ -273,7 +277,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.fill('#l-user', 'ali'); await page.fill('#l-pw', 'ali12345'); await page.click('[data-act=login]');
   await page.waitForSelector('.shell');
   const navTxt = await text('.nav');
-  check('staff does not see Sales, Settings, Udhaar or Profit', !navTxt.includes('Sales') && !navTxt.includes('Settings') && !navTxt.includes('Udhaar') && !navTxt.includes('Profit') && navTxt.includes('New bill'));
+  check('staff does not see Sales, Settings, Udhaar or Profit', !navTxt.includes('Sales') && !navTxt.includes('Settings') && !navTxt.includes('Udhaar') && !navTxt.includes('Profit') && navTxt.includes('Checkout') && navTxt.includes('Inventory'));
   check("staff top bar has no sales chip", (await page.locator('.chip-eye').count()) === 0);
   await page.click('.tile:has-text("Navy Blue Suit")');
   await page.fill('#discval', '20');
@@ -281,7 +285,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.fill('#discval', '15');
   await page.click('[data-act=exact]');
   check('staff can give 15%', !(await page.locator('[data-act=save][data-print="1"]').isDisabled()), await text('.hint'));
-  await nav('prices');
+  await nav('inventory');
   check('staff sees the price list read-only', (await page.locator('[data-act=editSuit]').count()) === 0 && (await page.locator('[data-act=addSuit]').count()) === 0);
   check('staff sees no cost or profit column', !/Cost|Profit/.test(await text('.content')));
   await shot('13-staff-prices');

@@ -21,6 +21,10 @@ const DEFAULT_SETTINGS = {
   backupDir: '',
   logo: '', // data URI, optional
   qr: '', // data URI, optional
+  invoicePrefix: 'BS', // invoice numbers look like BS-0042
+  exchangeNote: 'Exchange possible within 3 days with receipt.', // printed at the bottom of the receipt
+  lowStockAt: 3, // a suit with this many or fewer left is marked Low
+  receiptOffsetMm: 0, // moves the receipt left (minus) or right (plus) if the printer is off-centre
 };
 
 function freshData() {
@@ -31,6 +35,8 @@ function freshData() {
     suits: [],
     bills: [],
     payments: [], // money received later from customers who took udhaar
+    stockLog: [], // every change in how many of a suit are in the shop
+    recovery: null, // the forgot-password code (stored only as a hash)
     counters: { billNo: 0, id: 0 },
     audit: [],
   };

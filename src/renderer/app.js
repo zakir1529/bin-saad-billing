@@ -47,6 +47,10 @@
     method: (S.settings && S.settings.paymentMethods[0]) || 'Cash', received: '', name: '', phone: '',
   });
 
+  function freshLogin() {
+    return { username: '', password: '', name: '', password2: '', error: '', mode: 'login', code: '', newCode: '', busy: false };
+  }
+
   const S = {
     status: null, user: null, settings: null, suits: [],
     view: 'billing', search: '', group: 'All', bill: null, saving: false, done: null,
@@ -55,9 +59,10 @@
     udhaar: { q: '', list: null, sel: null, detail: null, pay: null, busy: false },
     profit: { month: monthKey(), data: null },
     sales: { day: todayKey(), month: monthKey(), day_data: null, month_data: null },
-    reveal: { on: false, today: null, timer: null },
+    reveal: { on: false, today: null, timer: null, unlocked: false },
+    showPw: {}, stock: { log: [] },
     form: null, newUser: { name: '', username: '', password: '' }, pw: { old: '', a: '', b: '' },
-    printers: null, info: null, modal: null, toast: null, login: { username: 'owner', password: '', name: '', password2: '', error: '' },
+    printers: null, info: null, modal: null, toast: null, login: freshLogin(),
   };
 
   // ---------- small helpers ----------
@@ -115,6 +120,9 @@
     const b = S.bill;
     const out = { ok: false, hint: '', t: null, rec: null, change: 0 };
     if (!b.lines.length) { out.hint = 'Tap a suit to start the bill.'; return out; }
+    for (const l of b.lines) {
+      if (l.qty > maxQty(l.suitId)) { out.hint = `Only ${maxQty(l.suitId)} of ${l.name} in stock.`; return out; }
+    }
     try {
       out.t = M.computeTotals(b.lines.map((l) => ({ price: l.price, qty: l.qty })), { type: b.discType, value: b.discVal });
     } catch (e) { out.hint = e.message; return out; }
@@ -141,12 +149,22 @@
     return out;
   }
 
+  // How many of a suit can still be sold. Suits that are not being counted have no limit.
+  const stockOf = (s) => (s && s.stock !== null && s.stock !== undefined ? s.stock : null);
+  function maxQty(suitId) {
+    const st = stockOf(S.suits.find((x) => x.id === suitId));
+    return st === null ? M.MAX_QTY : Math.min(M.MAX_QTY, st);
+  }
   function addSuit(id) {
     const s = S.suits.find((x) => x.id === id);
     if (!s) return;
+    const st = stockOf(s);
     const line = S.bill.lines.find((l) => l.suitId === id);
-    if (line) { if (line.qty < M.MAX_QTY) line.qty += 1; }
-    else S.bill.lines.push({ suitId: s.id, name: s.name, price: s.price, qty: 1 });
+    if (st === 0) { toast(`${s.name} is out of stock.`, 'error'); return; }
+    if (line) {
+      if (line.qty < maxQty(id)) line.qty += 1;
+      else if (st !== null) { toast(`Only ${st} of ${s.name} in stock.`, 'error'); return; }
+    } else S.bill.lines.push({ suitId: s.id, name: s.name, price: s.price, qty: 1 });
     render();
   }
 
@@ -178,6 +196,7 @@
     S.bill = newBill();
     S.search = '';
     S.done = { bill: result.bill, print: print ? 'printing' : 'skipped', error: '' };
+    try { S.suits = await call('listSuits', {}); } catch (e) { /* the counts refresh next time */ }
     render();
     if (print) await doPrint(result.bill.id);
     refreshInfo();
@@ -198,7 +217,7 @@
   // ---------- hidden figures (the eye button) ----------
   function hideReveal() {
     clearTimeout(S.reveal.timer);
-    S.reveal = { on: false, today: null, timer: null };
+    S.reveal = { on: false, today: null, timer: null, unlocked: S.reveal.unlocked };
     S.sales.day_data = null;
     S.sales.month_data = null;
     S.profit.data = null;
@@ -215,7 +234,8 @@
   }
   async function toggleReveal() {
     if (S.reveal.on) return hideReveal();
-    if (S.settings.revealNeedsPassword) { S.modal = { type: 'password', error: '' }; render(); return; }
+    // The password is asked once each time the program is opened. After that the eye just shows and hides.
+    if (S.settings.revealNeedsPassword && !S.reveal.unlocked) { S.modal = { type: 'password', error: '' }; render(); return; }
     await doReveal();
   }
   async function loadProfit() {
@@ -239,16 +259,21 @@
     S.modal = null;
     S.done = null;
     S.toast = null;
+    S.showPw = {};
     render();
     await safe(async () => {
       if (view === 'billing') S.suits = await call('listSuits', {});
       if (view === 'bills') await loadBills();
-      if (view === 'prices') await reloadSuits();
+      if (view === 'inventory') {
+        await reloadSuits();
+        if (S.user.role === 'owner') S.stock.log = await call('listStockLog', 30);
+      }
       if (view === 'sales' && S.reveal.on) await loadSales();
       if (view === 'profit' && S.reveal.on) await loadProfit();
       if (view === 'udhaar') await loadUdhaar();
       if (view === 'settings') {
         S.settings = await call('getSettings');
+        S.recovery = await call('recoveryInfo');
         S.form = { ...S.settings, paymentMethodsText: S.settings.paymentMethods.join(', ') };
         S.users = await call('listUsers');
         S.printers = await call('listPrinters').catch(() => []);
@@ -277,34 +302,62 @@
   const DOTS = '••••••';
   const shown = (n) => (S.reveal.on ? money(n) : DOTS);
 
+  // A password box with an eye button, so what is being typed can be checked.
+  function pwInput(id, bind, value, opts = {}) {
+    const show = !!S.showPw[id];
+    return `<div class="pw"><input id="${id}" type="${show ? 'text' : 'password'}" data-bind="${bind}" ${opts.enter ? `data-enter="${opts.enter}"` : ''} ${opts.autofocus ? 'data-autofocus="1"' : ''} aria-label="${esc(opts.label || 'Password')}" ${opts.placeholder ? `placeholder="${esc(opts.placeholder)}"` : ''} value="${esc(value)}" autocomplete="off">
+      <button type="button" class="pweye" data-act="pwtoggle" data-for="${id}" aria-label="${show ? 'Hide' : 'Show'} password" title="${show ? 'Hide' : 'Show'} password">${show ? EYE_OPEN : EYE_SLASH}</button></div>`;
+  }
+
   function viewLogin() {
     const L = S.login;
+    const shop = esc(S.status.shopName);
     if (S.status.needsSetup) {
       return `<div class="login"><div class="box">
-        <h1>${esc(S.status.shopName)}</h1><div class="sub">First time set-up. Create the owner password.</div>
+        <h1>${shop}</h1><div class="sub">First time set-up. Create the owner password.</div>
         <div class="stack">
           <div><label class="field" for="l-name">Your name</label><input id="l-name" type="text" data-bind="login.name" value="${esc(L.name)}"></div>
-          <div><label class="field" for="l-pw">Password (at least 4 characters)</label><input id="l-pw" type="password" data-bind="login.password" data-enter="setup" value="${esc(L.password)}"></div>
-          <div><label class="field" for="l-pw2">Type the password again</label><input id="l-pw2" type="password" data-bind="login.password2" data-enter="setup" value="${esc(L.password2)}"></div>
+          <div><label class="field" for="l-pw">Password (at least 4 characters)</label>${pwInput('l-pw', 'login.password', L.password, { enter: 'setup', label: 'Password' })}</div>
+          <div><label class="field" for="l-pw2">Type the password again</label>${pwInput('l-pw2', 'login.password2', L.password2, { enter: 'setup', label: 'Password again' })}</div>
           <button class="btn primary big" data-act="setup">Create and start</button>
+          <div class="muted small">Next you will get a recovery code. Write it on paper. It is the only way back in if the password is forgotten.</div>
           <div class="err">${esc(L.error)}</div>
         </div></div></div>`;
     }
+    if (L.mode === 'forgot') {
+      return `<div class="login"><div class="box">
+        <h1>Forgot password</h1><div class="sub">${S.status.hasRecovery ? 'Type the recovery code you wrote down, then choose a new password. Your bills and data stay as they are.' : 'No recovery code was made on this computer yet. The owner can make one in Settings after logging in.'}</div>
+        <div class="stack">
+          <div><label class="field" for="l-code">Recovery code</label><input id="l-code" type="text" data-bind="login.code" data-enter="resetPw" value="${esc(L.code)}" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" data-autofocus="1" style="letter-spacing:2px;text-transform:uppercase"></div>
+          <div><label class="field" for="l-npw">New password (at least 4 characters)</label>${pwInput('l-npw', 'login.password', L.password, { enter: 'resetPw', label: 'New password' })}</div>
+          <div><label class="field" for="l-npw2">Type the new password again</label>${pwInput('l-npw2', 'login.password2', L.password2, { enter: 'resetPw', label: 'New password again' })}</div>
+          <button class="btn primary big" data-act="resetPw" ${S.status.hasRecovery && !L.busy ? '' : 'disabled'}>Set the new password</button>
+          <div class="err">${esc(L.error)}</div>
+          <button class="link" data-act="backToLogin" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Back to log in</button>
+        </div></div></div>`;
+    }
+    if (L.mode === 'newcode') {
+      return `<div class="login"><div class="box">
+        <h1>Password changed</h1><div class="sub">Your old recovery code no longer works. Write this new one on paper and keep it somewhere safe, away from the shop computer.</div>
+        <div class="stack"><div class="codebox" id="rc-code">${esc(L.newCode)}</div>
+          <button class="btn primary big" data-act="codeDone">I have written it down. Go to log in</button></div></div></div>`;
+    }
     return `<div class="login"><div class="box">
-      <h1>${esc(S.status.shopName)}</h1><div class="sub">Please log in</div>
+      <h1>${shop}</h1><div class="sub">Please log in</div>
       <div class="stack">
-        <div><label class="field" for="l-user">Username</label><input id="l-user" type="text" data-bind="login.username" data-enter="login" value="${esc(L.username)}" autocomplete="off"></div>
-        <div><label class="field" for="l-pw">Password</label><input id="l-pw" type="password" data-bind="login.password" data-enter="login" value="${esc(L.password)}" data-autofocus="1"></div>
+        <div><label class="field" for="l-user">Username or name</label><input id="l-user" type="text" data-bind="login.username" data-enter="login" value="${esc(L.username)}" placeholder="owner" autocomplete="off" data-autofocus="1"></div>
+        <div><label class="field" for="l-pw">Password</label>${pwInput('l-pw', 'login.password', L.password, { enter: 'login', label: 'Password' })}</div>
         <button class="btn primary big" data-act="login">Log in</button>
         <div class="err">${esc(L.error)}</div>
+        <button class="link" data-act="forgotGo" style="background:none;border:0;color:var(--accent);text-align:left;padding:0;font-size:13px">Forgot password?</button>
       </div></div></div>`;
   }
 
-  const TITLES = { billing: 'New bill', bills: 'Bills', prices: 'Price list', udhaar: 'Udhaar', profit: 'Profit', sales: 'Sales', settings: 'Settings' };
+  const TITLES = { billing: 'Checkout', inventory: 'Inventory', bills: 'Bills', udhaar: 'Udhaar', profit: 'Profit', sales: 'Sales', settings: 'Settings' };
 
   function shell(content) {
     const owner = S.user.role === 'owner';
-    const items = [['billing', 'New bill'], ['bills', 'Bills'], ['prices', owner ? 'Price list' : 'Prices']];
+    const items = [['billing', 'Checkout'], ['inventory', 'Inventory'], ['bills', 'Bills']];
     if (owner) items.push(['udhaar', 'Udhaar'], ['profit', 'Profit'], ['sales', 'Sales'], ['settings', 'Settings']);
     const backupWarn = S.info && S.info.backupFolderSet && S.info.lastBackup && S.info.lastBackup.ok === false;
     return `<div class="shell">
@@ -331,12 +384,17 @@
     const inBill = new Map(S.bill.lines.map((l) => [l.suitId, l.qty]));
     let tiles;
     if (!S.suits.length) {
-      tiles = `<div class="empty" style="grid-column:1/-1">There are no suits in the price list yet.${S.user.role === 'owner' ? '<br><br><button class="btn primary" data-act="nav" data-view="prices">Add suits</button>' : '<br>Ask the owner to add them.'}</div>`;
+      tiles = `<div class="empty" style="grid-column:1/-1">There are no suits in the price list yet.${S.user.role === 'owner' ? '<br><br><button class="btn primary" data-act="nav" data-view="inventory">Add suits</button>' : '<br>Ask the owner to add them.'}</div>`;
     } else if (!list.length) {
       tiles = '<div class="empty" style="grid-column:1/-1">No suit matches this search.</div>';
     } else {
-      tiles = list.map((s) => `<button class="tile ${inBill.has(s.id) ? 'in' : ''}" data-act="tile" data-id="${s.id}">
-        <span class="nm">${esc(s.name)}</span><span class="pr num">${money(s.price)}</span>${inBill.has(s.id) ? `<span class="qty">x${inBill.get(s.id)}</span>` : ''}</button>`).join('');
+      tiles = list.map((s) => {
+        const st = stockOf(s);
+        const low = st !== null && st > 0 && st <= S.settings.lowStockAt;
+        const stk = st === null ? '' : st === 0 ? '<span class="stk out">Out of stock</span>' : `<span class="stk ${low ? 'low' : ''}">${low ? 'Only ' + st + ' left' : st + ' in stock'}</span>`;
+        return `<button class="tile ${inBill.has(s.id) ? 'in' : ''} ${st === 0 ? 'out' : ''}" data-act="tile" data-id="${s.id}" ${st === 0 ? 'disabled' : ''}>
+          <span class="nm">${esc(s.name)}</span><span><span class="pr num">${money(s.price)}</span><br>${stk}</span>${inBill.has(s.id) ? `<span class="qty">x${inBill.get(s.id)}</span>` : ''}</button>`;
+      }).join('');
     }
     return `<div class="billing">
       <div class="picker">
@@ -404,7 +462,7 @@
   function viewBills() {
     const f = S.bills;
     const rows = (f.list || []).map((b) => `<tr class="click ${f.sel === b.id ? 'sel' : ''}" data-act="pickBill" data-id="${b.id}">
-      <td class="num"><b>${pad4(b.no)}</b></td><td class="num">${when(b.createdAt)}</td>
+      <td class="num"><b>${esc(b.invoice || pad4(b.no))}</b></td><td class="num">${when(b.createdAt)}</td>
       <td>${esc(b.customerName || '')} <span class="muted small">${esc(b.customerPhone || '')}</span></td>
       <td class="right num"><b>${money(b.total)}</b></td><td>${esc(b.method)}</td>
       <td>${b.status === 'cancelled' ? '<span class="pill bad">Cancelled</span>' : ''}${b.status !== 'cancelled' && b.due > 0 ? '<span class="pill off">Udhaar</span>' : ''}</td></tr>`).join('');
@@ -412,13 +470,13 @@
     return `<div class="split">
       <div>
         <div class="card row wrap" style="margin-bottom:12px">
-          <div class="field-wrap" style="min-width:220px"><label class="field" for="bq">Find by bill number, customer, phone or suit</label><input id="bq" type="text" data-bind="bills.text" data-bills="1" value="${esc(f.text)}" placeholder="For example 12, Imran, 0300..., Navy"></div>
+          <div class="field-wrap" style="min-width:220px"><label class="field" for="bq">Find by invoice number, customer, phone or suit</label><input id="bq" type="text" data-bind="bills.text" data-bills="1" value="${esc(f.text)}" placeholder="For example BS-0012, 12, Imran, 0300..., Navy"></div>
           <div><label class="field" for="bfrom">From</label><input id="bfrom" type="date" data-bind="bills.from" data-bills="1" value="${esc(f.from)}"></div>
           <div><label class="field" for="bto">To</label><input id="bto" type="date" data-bind="bills.to" data-bills="1" value="${esc(f.to)}"></div>
           <div><label class="field" for="bst">Status</label><select id="bst" data-bind="bills.state" data-bills="1"><option value="">All</option><option value="paid" ${f.state === 'paid' ? 'selected' : ''}>Paid</option><option value="cancelled" ${f.state === 'cancelled' ? 'selected' : ''}>Cancelled</option></select></div>
         </div>
         <div class="card" style="padding:0;overflow:hidden">
-          <table><thead><tr><th>No.</th><th>Date and time</th><th>Customer</th><th class="right">Total</th><th>Paid by</th><th></th></tr></thead>
+          <table><thead><tr><th>Invoice</th><th>Date and time</th><th>Customer</th><th class="right">Total</th><th>Paid by</th><th></th></tr></thead>
           <tbody>${rows || '<tr><td colspan="6" class="empty">No bills found.</td></tr>'}</tbody></table>
         </div>
       </div>
@@ -429,7 +487,7 @@
   function billDetail(b) {
     const owner = S.user.role === 'owner';
     return `<div class="card">
-      <div class="row between"><h2>Bill ${pad4(b.no)}</h2>${b.status === 'cancelled' ? '<span class="pill bad">Cancelled</span>' : '<span class="pill ok">Paid</span>'}</div>
+      <div class="row between"><h2>Bill ${esc(b.invoice || pad4(b.no))}</h2>${b.status === 'cancelled' ? '<span class="pill bad">Cancelled</span>' : '<span class="pill ok">Paid</span>'}</div>
       <div class="muted small" style="margin:4px 0 10px">${when(b.createdAt)} &middot; ${esc(b.cashier)}${b.customerName ? ' &middot; ' + esc(b.customerName) : ''}${b.customerPhone ? ' ' + esc(b.customerPhone) : ''}</div>
       <table>${b.lines.map((l) => `<tr><td>${esc(l.name)}<div class="muted small">${l.qty} x ${money(l.price)}</div></td><td class="right num">${money(l.amount)}</td></tr>`).join('')}</table>
       <div style="margin-top:8px">
@@ -452,27 +510,51 @@
     </div>`;
   }
 
-  // ----- price list -----
-  function viewPrices() {
+  // ----- inventory: the suits, their prices, costs and how many are in the shop -----
+  function viewInventory() {
     const owner = S.user.role === 'owner';
     const all = owner ? S.prices.all : S.suits;
     const q = S.prices.q.trim().toLowerCase();
     const list = all.filter((s) => !q || s.name.toLowerCase().includes(q) || (s.group || '').toLowerCase().includes(q));
+    const lowAt = S.settings.lowStockAt;
+    const counted = all.filter((s) => s.active && stockOf(s) !== null);
+    const pieces = counted.reduce((n, s) => n + s.stock, 0);
+    const outN = counted.filter((s) => s.stock === 0).length;
+    const lowN = counted.filter((s) => s.stock > 0 && s.stock <= lowAt).length;
     const noCost = '<span class="muted small">not set</span>';
+    const stockCell = (s) => {
+      const st = stockOf(s);
+      if (st === null) return '<span class="muted small">not counted</span>';
+      if (st === 0) return '<span class="pill bad">Out</span>';
+      return `<b class="num">${st}</b>${st <= lowAt ? ' <span class="pill warn">Low</span>' : ''}`;
+    };
     const rows = list.map((s) => {
       const has = s.cost !== null && s.cost !== undefined;
       return `<tr><td><b>${esc(s.name)}</b></td><td class="muted">${esc(s.group || '')}</td><td class="right num">${money(s.price)}</td>
       ${owner ? `<td class="right num">${has ? shown(s.cost) : noCost}</td><td class="right num">${has ? shown(s.price - s.cost) : noCost}</td>` : ''}
+      <td class="right">${stockCell(s)}</td>
       <td>${s.active ? '<span class="pill ok">On</span>' : '<span class="pill off">Off</span>'}</td>
-      <td class="right">${owner ? `<button class="btn small" data-act="editSuit" data-id="${s.id}">Edit</button>` : ''}</td></tr>`;
+      <td class="right" style="white-space:nowrap">${owner ? `<button class="btn small" data-act="stockIn" data-id="${s.id}">+ Stock</button> <button class="btn small" data-act="editSuit" data-id="${s.id}">Edit</button>` : ''}</td></tr>`;
     }).join('');
-    return `<div class="card row wrap" style="margin-bottom:12px">
-        <div class="field-wrap" style="min-width:240px"><label class="field" for="pq">Search the list</label><input id="pq" type="text" data-bind="prices.q" data-rerender="1" value="${esc(S.prices.q)}" placeholder="Suit name or group"></div>
-        ${owner ? '<div style="align-self:flex-end" class="row"><button class="btn primary" data-act="addSuit">Add a suit</button><button class="btn" data-act="pasteList">Paste a list</button>' + eyeBtn() + '</div>' : '<div class="muted small" style="align-self:flex-end">Only the owner can change prices.</div>'}
+    const log = owner && S.stock.log.length
+      ? `<div class="card" style="margin-top:14px;padding:0;overflow:hidden"><div style="padding:12px 14px 6px"><h2>Recent stock changes</h2></div>
+          <table><thead><tr><th>When</th><th>Suit</th><th class="right">Change</th><th class="right">Now</th><th>Why</th></tr></thead><tbody>
+          ${S.stock.log.map((x) => `<tr><td class="num">${when(x.at)}</td><td>${esc(x.name)}</td><td class="right num"><span class="pill ${x.delta > 0 ? 'ok' : 'off'}">${x.delta > 0 ? '+' : ''}${x.delta}</span></td><td class="right num">${x.balance}</td><td class="muted">${esc(x.reason)}${x.by ? ' &middot; ' + esc(x.by) : ''}</td></tr>`).join('')}</tbody></table></div>`
+      : '';
+    return `<div class="stats" style="margin-bottom:12px">
+        <div class="stat"><div class="k">Suits on sale</div><div class="v num">${all.filter((s) => s.active).length}</div></div>
+        <div class="stat"><div class="k">Pieces in stock (counted suits)</div><div class="v num">${counted.length ? pieces : '-'}</div></div>
+        <div class="stat"><div class="k">Running low</div><div class="v num" style="${lowN ? 'color:var(--warn)' : ''}">${counted.length ? lowN : '-'}</div></div>
+        <div class="stat"><div class="k">Out of stock</div><div class="v num" style="${outN ? 'color:var(--danger)' : ''}">${counted.length ? outN : '-'}</div></div>
       </div>
-      <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Suit</th><th>Group</th><th class="right">Price</th>${owner ? '<th class="right">Cost</th><th class="right">Profit each</th>' : ''}<th>Status</th><th></th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="${owner ? 7 : 5}" class="empty">No suits yet.</td></tr>`}</tbody></table></div>
-      ${owner ? '<div class="muted small" style="margin-top:8px">Cost and profit stay hidden until you click the eye. Profit each = price minus cost, before any discount.</div>' : ''}`;
+      <div class="card row wrap" style="margin-bottom:12px">
+        <div class="field-wrap" style="min-width:240px"><label class="field" for="pq">Search the suits</label><input id="pq" type="text" data-bind="prices.q" data-rerender="1" value="${esc(S.prices.q)}" placeholder="Suit name or group"></div>
+        ${owner ? '<div style="align-self:flex-end" class="row wrap"><button class="btn primary" data-act="addSuit">Add a suit</button><button class="btn" data-act="pasteList">Paste a list</button><button class="btn" data-act="pasteStock">Paste stock counts</button>' + eyeBtn() + '</div>' : '<div class="muted small" style="align-self:flex-end">Only the owner can change prices and stock.</div>'}
+      </div>
+      <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Suit</th><th>Group</th><th class="right">Price</th>${owner ? '<th class="right">Cost</th><th class="right">Profit each</th>' : ''}<th class="right">In stock</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="${owner ? 8 : 5}" class="empty">No suits yet.</td></tr>`}</tbody></table></div>
+      ${log}
+      ${owner ? '<div class="muted small" style="margin-top:8px">Cost and profit stay hidden until you click the eye. A suit with an empty stock box is not counted and can always be sold. Counted suits go down with every sale and cannot be sold when they run out.</div>' : ''}`;
   }
 
   // ----- udhaar (owner): who owes money, and money received back -----
@@ -503,7 +585,7 @@
         </div>
         <h2 style="margin:16px 0 6px">Bills with udhaar</h2>
         <table><thead><tr><th>No.</th><th>Date</th><th class="right">Total</th><th class="right">Paid</th><th class="right">Left</th></tr></thead><tbody>
-          ${d.billList.map((b) => `<tr><td class="num">${pad4(b.no)}</td><td class="num" style="white-space:nowrap">${when(b.createdAt).split(' ')[0]}</td><td class="right num">${money(b.total)}</td><td class="right num">${money(b.paid)}</td><td class="right num"><b>${money(b.due)}</b></td></tr>`).join('')}</tbody></table>
+          ${d.billList.map((b) => `<tr><td class="num">${esc(b.invoice || pad4(b.no))}</td><td class="num" style="white-space:nowrap">${when(b.createdAt).split(' ')[0]}</td><td class="right num">${money(b.total)}</td><td class="right num">${money(b.paid)}</td><td class="right num"><b>${money(b.due)}</b></td></tr>`).join('')}</tbody></table>
         <h2 style="margin:16px 0 6px">Money received back</h2>
         ${d.payments.length ? `<table><tbody>${d.payments.slice().reverse().map((x) => `<tr><td class="num">${when(x.at)}</td><td>${esc(x.method)}${x.note ? ' <span class="muted small">' + esc(x.note) + '</span>' : ''}</td><td class="right num"><b>${money(x.amount)}</b></td></tr>`).join('')}</tbody></table>` : '<div class="muted small">Nothing received back yet.</div>'}
       </div>`;
@@ -574,7 +656,8 @@
     return `<div class="card row between" style="margin-bottom:12px">
         <div class="muted">${on ? 'Figures are visible for a few seconds, then hide again.' : 'Sales are hidden. Click the eye to show them.'}</div>${eyeBtn()}</div>
       <div class="row wrap" style="margin-bottom:10px"><h2>One day</h2>
-        <input type="date" id="sday" data-bind="sales.day" data-sales="1" value="${esc(S.sales.day)}" style="width:170px" aria-label="Pick a day"></div>
+        <input type="date" id="sday" data-bind="sales.day" data-sales="1" value="${esc(S.sales.day)}" style="width:170px" aria-label="Pick a day">
+        <button class="btn" data-act="dayPdf">Download this day (PDF)</button></div>
       <div class="stats">
         <div class="stat"><div class="k">Sales</div><div class="v num">${on && d ? money(d.sales) : DOTS}</div></div>
         <div class="stat"><div class="k">Bills</div><div class="v num">${on && d ? d.bills : DOTS}</div></div>
@@ -614,7 +697,9 @@
         <div><label class="field" for="f-addr">Address</label><input id="f-addr" type="text" data-bind="form.address" value="${esc(f.address)}"></div>
         <div class="row"><div class="field-wrap"><label class="field" for="f-ph">Phone</label><input id="f-ph" type="text" data-bind="form.phone" value="${esc(f.phone)}"></div>
           <div class="field-wrap"><label class="field" for="f-wa">WhatsApp number</label><input id="f-wa" type="text" data-bind="form.whatsapp" value="${esc(f.whatsapp)}"></div></div>
-        <div><label class="field" for="f-ft">Line at the bottom of the receipt</label><input id="f-ft" type="text" data-bind="form.footer" value="${esc(f.footer)}"></div>
+        <div><label class="field" for="f-ft">Thank-you line at the bottom of the receipt</label><input id="f-ft" type="text" data-bind="form.footer" value="${esc(f.footer)}"></div>
+        <div class="row"><div class="field-wrap"><label class="field" for="f-ex">Exchange line (printed under it)</label><input id="f-ex" type="text" data-bind="form.exchangeNote" value="${esc(f.exchangeNote)}"></div>
+          <div style="width:150px"><label class="field" for="f-inv">Invoice letters</label><input id="f-inv" type="text" data-bind="form.invoicePrefix" value="${esc(f.invoicePrefix)}" maxlength="4" placeholder="BS"></div></div>
         ${img('logo', 'Logo')}${img('qr', 'WhatsApp QR')}
         <div><button class="btn primary" data-act="saveShop">Save shop details</button></div></div></div>
 
@@ -622,12 +707,14 @@
         <div class="row"><div class="field-wrap"><label class="field" for="f-pw">Paper width</label><select id="f-pw" data-bind="form.paperWidthMm" data-kind="number"><option value="80" ${Number(f.paperWidthMm) === 80 ? 'selected' : ''}>80 mm (wide roll)</option><option value="58" ${Number(f.paperWidthMm) === 58 ? 'selected' : ''}>58 mm (narrow roll)</option></select></div>
           <div class="field-wrap"><label class="field" for="f-pr">Printer</label><select id="f-pr" data-bind="form.printerName"><option value="">Windows default printer</option>
             ${printers.map((p) => `<option value="${esc(p.name)}" ${f.printerName === p.name ? 'selected' : ''}>${esc(p.displayName)}${p.isDefault ? ' (default)' : ''}</option>`).join('')}</select></div></div>
+        <div class="row"><div class="field-wrap"><label class="field" for="f-off">Move the receipt sideways (mm, from -10 to 10). Use this only if it prints off-centre.</label><input id="f-off" type="text" inputmode="numeric" data-bind="form.receiptOffsetMm" data-kind="signed" value="${esc(f.receiptOffsetMm)}" style="max-width:120px"></div></div>
         <label class="row"><input type="checkbox" data-bind="form.silentPrint" ${f.silentPrint ? 'checked' : ''}> Print straight away, without asking each time</label>
         <div class="row"><button class="btn primary" data-act="savePrinter">Save printer settings</button><button class="btn" data-act="testPrint">Print a test receipt</button><button class="btn" data-act="testPreview">Preview</button></div></div></div>
 
       <div class="card"><h2>Discounts and payment methods</h2><div class="stack" style="margin-top:10px">
         <div class="row"><div class="field-wrap"><label class="field" for="f-dl">Largest discount staff can give (%)</label><input id="f-dl" type="text" inputmode="decimal" data-bind="form.discountLimitPct" data-kind="decimal" value="${esc(f.discountLimitPct)}"></div>
           <div class="field-wrap"><label class="field" for="f-pm">Payment methods (separate with commas)</label><input id="f-pm" type="text" data-bind="form.paymentMethodsText" value="${esc(f.paymentMethodsText)}"></div></div>
+        <div class="row"><div class="field-wrap"><label class="field" for="f-ls">Mark a suit Low when this many or fewer are left</label><input id="f-ls" type="text" inputmode="numeric" data-bind="form.lowStockAt" data-kind="digits" value="${esc(f.lowStockAt)}" style="max-width:120px"></div></div>
         <label class="row"><input type="checkbox" data-bind="form.revealNeedsPassword" ${f.revealNeedsPassword ? 'checked' : ''}> Ask for the password before showing sales</label>
         <div><button class="btn primary" data-act="saveRules">Save</button></div></div></div>
 
@@ -645,13 +732,18 @@
           ${u.role !== 'owner' ? `<button class="btn small" data-act="userToggle" data-id="${u.id}">${u.active ? 'Switch off' : 'Switch on'}</button>` : ''}</td></tr>`).join('')}</tbody></table>
         <div class="row wrap" style="margin-top:12px"><div class="field-wrap"><label class="field" for="nu-n">Staff name</label><input id="nu-n" type="text" data-bind="newUser.name" value="${esc(S.newUser.name)}"></div>
           <div class="field-wrap"><label class="field" for="nu-u">Username</label><input id="nu-u" type="text" data-bind="newUser.username" value="${esc(S.newUser.username)}"></div>
-          <div class="field-wrap"><label class="field" for="nu-p">Password</label><input id="nu-p" type="password" data-bind="newUser.password" value="${esc(S.newUser.password)}"></div>
+          <div class="field-wrap"><label class="field" for="nu-p">Password</label>${pwInput('nu-p', 'newUser.password', S.newUser.password, { label: 'Staff password' })}</div>
           <button class="btn primary" style="align-self:flex-end" data-act="addUser">Add staff</button></div></div>
 
+      <div class="card"><h2>Forgot-password code</h2><div class="stack" style="margin-top:10px">
+        <div class="muted">${S.recovery && S.recovery.exists ? 'A recovery code was made on ' + when(S.recovery.createdAt) + '. If the owner password is forgotten, choose <b>Forgot password?</b> on the log in screen and type the code.' : '<b style="color:var(--warn)">No recovery code yet.</b> Make one now and write it on paper. Without it, a forgotten password cannot be reset.'}</div>
+        <div><button class="btn primary" data-act="recoveryAsk">${S.recovery && S.recovery.exists ? 'Make a new code' : 'Make a recovery code'}</button></div>
+        <div class="muted small">A new code replaces the old one. Keep the paper away from the shop computer.</div></div></div>
+
       <div class="card"><h2>Change my password</h2><div class="row wrap" style="margin-top:10px">
-        <div class="field-wrap"><label class="field" for="p-o">Current password</label><input id="p-o" type="password" data-bind="pw.old" value="${esc(S.pw.old)}"></div>
-        <div class="field-wrap"><label class="field" for="p-a">New password</label><input id="p-a" type="password" data-bind="pw.a" value="${esc(S.pw.a)}"></div>
-        <div class="field-wrap"><label class="field" for="p-b">New password again</label><input id="p-b" type="password" data-bind="pw.b" value="${esc(S.pw.b)}"></div>
+        <div class="field-wrap"><label class="field" for="p-o">Current password</label>${pwInput('p-o', 'pw.old', S.pw.old, { label: 'Current password' })}</div>
+        <div class="field-wrap"><label class="field" for="p-a">New password</label>${pwInput('p-a', 'pw.a', S.pw.a, { label: 'New password' })}</div>
+        <div class="field-wrap"><label class="field" for="p-b">New password again</label>${pwInput('p-b', 'pw.b', S.pw.b, { label: 'New password again' })}</div>
         <button class="btn primary" style="align-self:flex-end" data-act="changePw">Change</button></div></div>
 
       <div class="muted small" style="margin-top:14px">${info ? 'Version ' + esc(info.version) + ' &middot; Data file: ' + esc(info.dataFile) : ''}</div>
@@ -666,7 +758,7 @@
       const b = d.bill;
       const status = { printing: '<span class="muted">Printing...</span>', ok: '<span class="pill ok">Receipt printed</span>', skipped: '<span class="muted">Saved without printing.</span>', failed: `<span class="hint">The bill is saved, but it did not print: ${esc(d.error)}</span>` }[d.print];
       return `<div class="overlay"><div class="dialog" role="dialog" aria-label="Bill saved">
-        <h2>Bill ${pad4(b.no)} saved</h2><div class="stack">
+        <h2>Bill ${esc(b.invoice || pad4(b.no))} saved</h2><div class="stack">
           <div class="sum total"><span>Total</span><span class="num">${money(b.total)}</span></div>
           ${b.due > 0 ? `<div class="muted small right">${b.paid > 0 ? 'Paid now ' + money(b.paid) + ' (' + esc(b.method) + ')' : 'Nothing paid now'}</div><div class="big-change due num">Udhaar: ${money(b.due)}</div><div class="muted small right">${esc(b.customerName)} ${esc(b.customerPhone)}</div>`
             : isCash(b.method) ? `<div class="muted small right">Received ${money(b.received)}</div><div class="big-change num">Change: ${money(b.change)}</div>` : `<div class="muted">Paid by ${esc(b.method)}</div>`}
@@ -677,8 +769,8 @@
     if (!m) return '';
     if (m.type === 'password') {
       return `<div class="overlay"><div class="dialog"><h2>Enter your password</h2><div class="stack">
-        <div class="muted small">To show today's sales, please confirm it is you.</div>
-        <input id="m-pw" type="password" data-bind="modal.value" data-enter="modalOk" data-autofocus="1" value="${esc(m.value || '')}" aria-label="Password">
+        <div class="muted small">To show sales, profit and cost, please confirm it is you. You will not be asked again until the program is closed and opened again.</div>
+        ${pwInput('m-pw', 'modal.value', m.value || '', { enter: 'modalOk', autofocus: true, label: 'Password' })}
         <div class="err">${esc(m.error)}</div>
         <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Show</button></div></div></div></div>`;
     }
@@ -688,7 +780,8 @@
         <div><label class="field" for="m-name">Suit name (no company name needed)</label><input id="m-name" type="text" data-bind="modal.name" data-enter="modalOk" data-autofocus="1" value="${esc(m.name)}"></div>
         <div class="row"><div class="field-wrap"><label class="field" for="m-price">Selling price (Rs.)</label><input id="m-price" type="text" inputmode="numeric" data-bind="modal.price" data-kind="digits" data-enter="modalOk" value="${esc(m.price)}"></div>
           <div class="field-wrap"><label class="field" for="m-cost">Cost price (Rs.), for profit</label><input id="m-cost" type="text" inputmode="numeric" data-bind="modal.cost" data-kind="digits" data-enter="modalOk" value="${esc(m.cost)}" placeholder="Optional"></div></div>
-        <div class="row"><div class="field-wrap"><label class="field" for="m-group">Group (optional)</label><input id="m-group" list="groups" type="text" data-bind="modal.group" data-enter="modalOk" value="${esc(m.group)}"><datalist id="groups">${groups.map((g) => `<option value="${esc(g)}">`).join('')}</datalist></div></div>
+        <div class="row"><div class="field-wrap"><label class="field" for="m-group">Group (optional)</label><input id="m-group" list="groups" type="text" data-bind="modal.group" data-enter="modalOk" value="${esc(m.group)}"><datalist id="groups">${groups.map((g) => `<option value="${esc(g)}">`).join('')}</datalist></div>
+          <div class="field-wrap"><label class="field" for="m-stock">In stock now</label><input id="m-stock" type="text" inputmode="numeric" data-bind="modal.stock" data-kind="digits" data-enter="modalOk" value="${esc(m.stock)}" placeholder="Empty = not counted"></div></div>
         ${m.id ? `<label class="row"><input type="checkbox" data-bind="modal.active" ${m.active ? 'checked' : ''}> Show this suit when billing</label>` : ''}
         <div class="muted small">Changing a price or cost affects new bills only. Old bills keep the price and cost they were sold at. Without a cost price, profit for that suit stays unknown.</div>
         <div class="err">${esc(m.error)}</div>
@@ -711,9 +804,38 @@
     }
     if (m.type === 'userpw') {
       return `<div class="overlay"><div class="dialog"><h2>New password for ${esc(m.name)}</h2><div class="stack">
-        <input id="m-upw" type="password" data-bind="modal.value" data-enter="modalOk" data-autofocus="1" value="${esc(m.value || '')}" aria-label="New password">
+        ${pwInput('m-upw', 'modal.value', m.value || '', { enter: 'modalOk', autofocus: true, label: 'New password' })}
         <div class="err">${esc(m.error)}</div>
         <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Save</button></div></div></div></div>`;
+    }
+    if (m.type === 'stockin') {
+      return `<div class="overlay"><div class="dialog"><h2>Stock in: ${esc(m.name)}</h2><div class="stack">
+        <div class="muted small">${m.now === null ? 'This suit is not counted yet. The number below becomes its first count.' : 'Now in stock: ' + m.now + '. The number below is added to it.'}</div>
+        <div><label class="field" for="m-qty">How many came in?</label><input id="m-qty" type="text" inputmode="numeric" data-bind="modal.qty" data-kind="digits" data-enter="modalOk" data-autofocus="1" value="${esc(m.qty)}"></div>
+        <div><label class="field" for="m-note">Note (optional)</label><input id="m-note" type="text" data-bind="modal.note" data-enter="modalOk" value="${esc(m.note)}" placeholder="For example: new delivery"></div>
+        <div class="err">${esc(m.error)}</div>
+        <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Add to stock</button></div></div></div></div>`;
+    }
+    if (m.type === 'stockpaste') {
+      return `<div class="overlay"><div class="dialog wide"><h2>Paste stock counts</h2><div class="stack">
+        <div class="muted small">One suit on each line: the name, then how many are in the shop right now. For example:<br><b>Navy Blue Suit, 12</b><br><b>Black Suit 7</b><br>This sets the count for each suit (use it for the first count or a recount). Names must match the Inventory list.</div>
+        <textarea id="m-paste" rows="9" data-bind="modal.text" data-autofocus="1" placeholder="Navy Blue Suit, 12">${esc(m.text)}</textarea>
+        ${m.result ? `<div class="pill ok" style="align-self:flex-start">${m.result.updated} counted</div>${m.result.unknown.length ? `<div class="hint">Not in the list: ${m.result.unknown.map(esc).join(', ')}</div>` : ''}${m.result.skipped.length ? `<div class="hint">Skipped (no number): ${m.result.skipped.map(esc).join(', ')}</div>` : ''}` : ''}
+        <div class="err">${esc(m.error)}</div>
+        <div class="row"><button class="btn" data-act="modalCancel">${m.result ? 'Close' : 'Cancel'}</button><button class="btn primary grow" data-act="modalOk">Save the counts</button></div></div></div></div>`;
+    }
+    if (m.type === 'recoveryMake') {
+      return `<div class="overlay"><div class="dialog"><h2>Make a recovery code</h2><div class="stack">
+        <div class="muted small">Type your password to confirm. A new code replaces the old one, which then stops working.</div>
+        ${pwInput('m-rpw', 'modal.value', m.value || '', { enter: 'modalOk', autofocus: true, label: 'Password' })}
+        <div class="err">${esc(m.error)}</div>
+        <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Make the code</button></div></div></div></div>`;
+    }
+    if (m.type === 'recovery') {
+      return `<div class="overlay"><div class="dialog"><h2>Your recovery code</h2><div class="stack">
+        <div class="codebox" id="rc-code">${esc(m.code)}</div>
+        <div class="muted">Write this code on paper now and keep it safe, away from the shop computer. If the owner password is ever forgotten, choose <b>Forgot password?</b> on the log in screen and type this code. It is shown only this once.</div>
+        <button class="btn primary big" data-act="modalCancel">I have written it down</button></div></div></div>`;
     }
     if (m.type === 'preview') {
       return `<div class="overlay"><div class="dialog"><h2>Receipt preview</h2><iframe class="receipt-frame" sandbox="" srcdoc="${esc(m.html)}" title="Receipt preview"></iframe>
@@ -739,7 +861,7 @@
     let html;
     if (!S.user) html = viewLogin();
     else {
-      const views = { billing: viewBilling, bills: viewBills, prices: viewPrices, udhaar: viewUdhaar, profit: viewProfit, sales: viewSales, settings: viewSettings };
+      const views = { billing: viewBilling, bills: viewBills, inventory: viewInventory, udhaar: viewUdhaar, profit: viewProfit, sales: viewSales, settings: viewSettings };
       html = shell(views[S.view]());
     }
     html += modalHtml();
@@ -783,17 +905,57 @@
       if (L.password !== L.password2) { L.error = 'The two passwords are not the same.'; render(); return; }
       try {
         const user = await call('setupOwner', { name: L.name, password: L.password });
+        const rc = await call('createRecoveryCode', L.password);
         S.status.needsSetup = false;
-        L.password = ''; L.password2 = ''; L.error = '';
+        S.status.hasRecovery = true;
+        S.login = freshLogin();
+        S.showPw = {};
         await afterLogin(user);
+        S.modal = { type: 'recovery', code: rc.code };
+        render();
       } catch (e) { L.error = e.message; render(); }
+    },
+    forgotGo() { S.login = { ...freshLogin(), mode: 'forgot' }; S.showPw = {}; render(); },
+    backToLogin() { S.login = freshLogin(); S.showPw = {}; render(); },
+    async resetPw() {
+      const L = S.login;
+      if (L.busy) return;
+      if (!L.code.trim()) { L.error = 'Type the recovery code.'; render(); return; }
+      if (L.password !== L.password2) { L.error = 'The two new passwords are not the same.'; render(); return; }
+      L.busy = true; L.error = ''; render();
+      try {
+        const r = await call('resetWithRecovery', L.code, L.password);
+        S.login = { ...freshLogin(), mode: 'newcode', newCode: r.code };
+        S.showPw = {};
+      } catch (e) { L.error = e.message; L.busy = false; }
+      render();
+    },
+    codeDone() { S.login = freshLogin(); S.showPw = {}; render(); },
+    pwtoggle(el) {
+      const id = el.dataset.for;
+      S.showPw[id] = !S.showPw[id];
+      render();
+      const input = document.getElementById(id);
+      if (input) { input.focus(); const n = input.value.length; try { input.setSelectionRange(n, n); } catch (e) { /* ignore */ } }
+    },
+    recoveryAsk() { S.modal = { type: 'recoveryMake', value: '', error: '' }; S.showPw = {}; render(); },
+    stockIn(el) {
+      const s = S.prices.all.find((x) => x.id === Number(el.dataset.id));
+      S.modal = { type: 'stockin', id: s.id, name: s.name, now: stockOf(s), qty: '', note: '', error: '' };
+      render();
+    },
+    pasteStock() { S.modal = { type: 'stockpaste', text: '', result: null, error: '' }; render(); },
+    async dayPdf() {
+      if (S.settings.revealNeedsPassword && !S.reveal.unlocked) { S.modal = { type: 'password', error: '', after: 'dayPdf' }; render(); return; }
+      const r = await call('dailyReportPdf', S.sales.day || todayKey());
+      toast('Saved: ' + r.file);
     },
     async logout() {
       await call('logout');
       clearTimeout(S.reveal.timer);
-      S.reveal = { on: false, today: null, timer: null };
-      S.user = null; S.bill = null; S.done = null; S.modal = null; S.form = null;
-      S.login = { username: 'owner', password: '', name: '', password2: '', error: '' };
+      S.reveal = { on: false, today: null, timer: null, unlocked: false };
+      S.user = null; S.bill = null; S.done = null; S.modal = null; S.form = null; S.showPw = {};
+      S.login = freshLogin();
       S.status = await call('status');
       render();
     },
@@ -807,7 +969,12 @@
       if (list.length === 1) { S.search = ''; addSuit(list[0].id); }
       else toast(list.length ? 'More than one suit matches. Tap the one you want.' : 'No suit matches this search.', 'error');
     },
-    qplus(el) { const l = S.bill.lines.find((x) => x.suitId === Number(el.dataset.id)); if (l && l.qty < M.MAX_QTY) l.qty++; render(); },
+    qplus(el) {
+      const l = S.bill.lines.find((x) => x.suitId === Number(el.dataset.id));
+      if (l && l.qty < maxQty(l.suitId)) l.qty++;
+      else if (l) toast(`Only ${maxQty(l.suitId)} of ${l.name} in stock.`, 'error');
+      render();
+    },
     qminus(el) { const l = S.bill.lines.find((x) => x.suitId === Number(el.dataset.id)); if (l && l.qty > 1) l.qty--; render(); },
     rm(el) { S.bill.lines = S.bill.lines.filter((x) => x.suitId !== Number(el.dataset.id)); render(); },
     clearBill() {
@@ -834,14 +1001,14 @@
     async pdfBill(el) { const r = await call('exportReceiptPdf', Number(el.dataset.id)); toast('Saved: ' + r.file); },
     cancelAsk(el) {
       const b = S.bills.list.find((x) => x.id === Number(el.dataset.id));
-      S.modal = { type: 'cancel', id: b.id, no: b.no, reason: '', error: '' };
+      S.modal = { type: 'cancel', id: b.id, no: b.invoice || b.no, reason: '', error: '' };
       render();
     },
 
-    addSuit() { S.modal = { type: 'suit', id: null, name: '', price: '', cost: '', group: '', active: true, error: '' }; render(); },
+    addSuit() { S.modal = { type: 'suit', id: null, name: '', price: '', cost: '', stock: '', group: '', active: true, error: '' }; render(); },
     editSuit(el) {
       const s = S.prices.all.find((x) => x.id === Number(el.dataset.id));
-      S.modal = { type: 'suit', id: s.id, name: s.name, price: String(s.price), cost: s.cost === null || s.cost === undefined ? '' : String(s.cost), group: s.group || '', active: s.active, error: '' };
+      S.modal = { type: 'suit', id: s.id, name: s.name, price: String(s.price), cost: s.cost === null || s.cost === undefined ? '' : String(s.cost), stock: stockOf(s) === null ? '' : String(s.stock), group: s.group || '', active: s.active, error: '' };
       render();
     },
     async pickUdhaar(el) {
@@ -876,10 +1043,32 @@
         if (m.type === 'password') {
           const ok = await call('verifyPassword', m.value || '');
           if (!ok) { m.error = 'Wrong password.'; m.value = ''; render(); return; }
+          S.reveal.unlocked = true;
           S.modal = null;
           await doReveal();
+          if (m.after === 'dayPdf') await ACT.dayPdf();
+        } else if (m.type === 'stockin') {
+          if (!m.qty) { m.error = 'Enter how many came in.'; render(); return; }
+          await call('addStock', { suitId: m.id, qty: Number(m.qty), note: m.note });
+          S.modal = null;
+          await reloadSuits();
+          S.stock.log = await call('listStockLog', 30);
+          toast('Stock added.');
+        } else if (m.type === 'stockpaste') {
+          if (m.result) { S.modal = null; render(); return; }
+          m.result = await call('importStock', m.text);
+          await reloadSuits();
+          S.stock.log = await call('listStockLog', 30);
+          m.error = '';
+          render();
+        } else if (m.type === 'recoveryMake') {
+          const r = await call('createRecoveryCode', m.value || '');
+          S.recovery = await call('recoveryInfo');
+          S.modal = { type: 'recovery', code: r.code };
+          S.showPw = {};
+          render();
         } else if (m.type === 'suit') {
-          await call('saveSuit', { id: m.id, name: m.name, price: m.price === '' ? 0 : Number(m.price), cost: m.cost === '' ? '' : Number(m.cost), group: m.group, active: m.active });
+          await call('saveSuit', { id: m.id, name: m.name, price: m.price === '' ? 0 : Number(m.price), cost: m.cost === '' ? '' : Number(m.cost), stock: m.stock === '' ? '' : Number(m.stock), group: m.group, active: m.active });
           S.modal = null;
           await reloadSuits();
           toast('Saved.');
@@ -909,17 +1098,18 @@
 
     async saveShop() {
       const f = S.form;
-      S.settings = await call('saveSettings', { shopName: f.shopName, address: f.address, phone: f.phone, whatsapp: f.whatsapp, footer: f.footer });
+      S.settings = await call('saveSettings', { shopName: f.shopName, address: f.address, phone: f.phone, whatsapp: f.whatsapp, footer: f.footer, exchangeNote: f.exchangeNote, invoicePrefix: f.invoicePrefix });
+      S.form.invoicePrefix = S.settings.invoicePrefix;
       toast('Saved.'); render();
     },
     async savePrinter() {
       const f = S.form;
-      S.settings = await call('saveSettings', { paperWidthMm: Number(f.paperWidthMm), printerName: f.printerName, silentPrint: f.silentPrint });
+      S.settings = await call('saveSettings', { paperWidthMm: Number(f.paperWidthMm), printerName: f.printerName, silentPrint: f.silentPrint, receiptOffsetMm: f.receiptOffsetMm === '' || f.receiptOffsetMm === '-' ? 0 : Number(f.receiptOffsetMm) });
       toast('Saved.'); render();
     },
     async saveRules() {
       const f = S.form;
-      S.settings = await call('saveSettings', { discountLimitPct: Number(f.discountLimitPct), paymentMethods: f.paymentMethodsText, revealNeedsPassword: f.revealNeedsPassword });
+      S.settings = await call('saveSettings', { discountLimitPct: Number(f.discountLimitPct), paymentMethods: f.paymentMethodsText, revealNeedsPassword: f.revealNeedsPassword, lowStockAt: f.lowStockAt === '' ? 0 : Number(f.lowStockAt) });
       if (!S.settings.paymentMethods.includes(S.bill.method)) S.bill.method = S.settings.paymentMethods[0];
       S.form.paymentMethodsText = S.settings.paymentMethods.join(', ');
       toast('Saved.'); render();
@@ -981,12 +1171,16 @@
     if (el.dataset.qty) {
       const v = parseInt(el.value, 10);
       const line = S.bill.lines.find((l) => l.suitId === Number(el.dataset.qty));
-      if (line && Number.isInteger(v) && v >= 1 && v <= M.MAX_QTY) { line.qty = v; render(); }
+      if (line && Number.isInteger(v) && v >= 1 && v <= M.MAX_QTY) {
+        const cap = maxQty(line.suitId);
+        if (v > cap) { line.qty = cap; toast(`Only ${cap} of ${line.name} in stock.`, 'error'); } else { line.qty = v; render(); }
+      }
       return;
     }
     if (!el.dataset.bind) return;
     let v = el.type === 'checkbox' ? el.checked : el.value;
     if (el.dataset.kind === 'digits') { const c = String(v).replace(/\D/g, ''); if (c !== v) el.value = c; v = c; }
+    if (el.dataset.kind === 'signed') { const c = String(v).replace(/[^\d-]/g, '').replace(/(?!^)-/g, ''); if (c !== v) el.value = c; v = c; }
     if (el.dataset.kind === 'decimal') { const c = String(v).replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1'); if (c !== v) el.value = c; v = c; }
     setPath(S, el.dataset.bind, v);
     if (el.dataset.rerender) render();
@@ -1012,6 +1206,10 @@
     const act = el && el.dataset && el.dataset.enter;
     if (act && ACT[act]) { e.preventDefault(); safe(() => ACT[act](el, e)); }
   });
+
+  // Nothing that goes wrong on a screen should leave the person with a blank window.
+  window.addEventListener('error', (e) => { try { toast('Something went wrong on this screen. Your saved bills are safe.', 'error'); } catch (x) { /* ignore */ } console.error(e.error || e.message); });
+  window.addEventListener('unhandledrejection', (e) => { e.preventDefault(); try { toast(e.reason && e.reason.message ? e.reason.message : 'Something went wrong. Your saved bills are safe.', 'error'); } catch (x) { /* ignore */ } });
 
   boot().catch((e) => { document.getElementById('app').textContent = 'Could not start: ' + e.message; });
 })();

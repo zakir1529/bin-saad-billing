@@ -100,3 +100,13 @@ Tested by the developer's tools (all passing):
 - Data lives on this one PC. Keep the USB backup going. There is no phone or remote view.
 - To update the program later, run a new installer over the old one. Data is kept.
 - Not included in this version (can be added): stock counting, returns and exchange, hold bill, day-closing cash check, expenses, a printed slip for money received back on udhaar.
+
+## New in this version
+- **Dark look, new tabs:** Checkout, Inventory, Bills, and (owner) Udhaar, Profit, Sales, Settings.
+- **Inventory:** each suit name+colour is its own item with a stock count. "+ Stock" adds pieces; "Paste stock counts" loads many. Out-of-stock suits cannot be sold.
+- **Invoice numbers** look like BS-0042 (letters can be changed in Settings).
+- **Forgot password:** at first start the program shows a recovery code. WRITE IT ON PAPER. On the login screen tap "Forgot password?" and enter it. Existing shops: Settings > Forgot-password code to make one.
+- **Eye buttons** on every password box. The sales/profit eye asks for the password once per program start.
+- **Receipt** is the new SALES style, centred on 58 mm and 80 mm paper. Exchange line is editable in Settings.
+- **Daily sales PDF:** Sales tab > "Download this day (PDF)" (saved in Documents\Bin Saad Reports).
+- **Safety:** errors are logged and the screen recovers; a backup is made on close.

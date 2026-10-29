@@ -371,8 +371,14 @@ test('receipt shows the discount line under the items, and DUPLICATE only on rep
   assert.ok(first.includes('BIN SAAD FABRICS'));
   assert.ok(first.includes('Navy Blue Suit'));
   assert.ok(first.includes('Discount (10%)'));
-  assert.ok(first.includes('-400'));
-  assert.ok(first.includes('Rs. 3,600'));
+  assert.ok(first.includes('-Rs 400'));
+  assert.ok(first.includes('Rs 3,600'));
+  assert.ok(first.includes('TOTAL DUE'));
+  assert.ok(first.includes('INVOICE:') && first.includes('BS-0001'));
+  assert.ok(first.includes('SOLD TO:') && first.includes('Walk-in Customer'));
+  assert.ok(first.includes('1 ITEM SOLD'));
+  assert.ok(first.includes('Exchange possible within 3 days with receipt.'));
+  assert.ok(!/@/.test(first.replace(/<style[\s\S]*?<\/style>/, ''))); // no email on the receipt
   assert.ok(first.includes('Change'));
   assert.ok(!first.includes('Imran')); // the customer's name is kept in the records but not printed
   assert.ok(!first.includes('Served by'));
@@ -599,7 +605,7 @@ test('the receipt never shows udhaar, the customer, or who served', () => {
   const b = ctx.svc.createBill(credit(ctx)).bill;
   const html = buildReceiptHtml(b, ctx.svc.getSettings());
   for (const word of ['Imran', '0300', 'Udhaar', 'UDHAAR', 'Balance', 'BALANCE', 'Served', 'Paid now', 'Cash']) assert.ok(!html.includes(word), word);
-  assert.ok(html.includes('Rs. 4,000'));
+  assert.ok(html.includes('Rs 4,000'));
 });
 
 test('old data without the new fields still loads and counts correctly', () => {
@@ -612,4 +618,213 @@ test('old data without the new fields still loads and counts correctly', () => {
   assert.equal(ctx.svc.dailyReport().byMethod.Cash, 4000);
   assert.equal(ctx.svc.listUdhaar().total, 0);
   assert.equal(ctx.svc.getBill(b.id).total, 4000);
+});
+
+// ---------- inventory (stock) ----------
+const navyId = (ctx) => ctx.suits['Navy Blue Suit'].id;
+
+test('stock: a counted suit goes down with each sale and the last one cannot be oversold', () => {
+  const ctx = setup();
+  ctx.svc.saveSuit({ id: navyId(ctx), name: 'Navy Blue Suit', price: 4000, stock: 3 });
+  ctx.svc.createBill(bill(ctx, { lines: [{ suitId: navyId(ctx), qty: 2 }], received: 8000 }));
+  assert.equal(ctx.svc.listSuits().find((x) => x.name === 'Navy Blue Suit').stock, 1);
+  assert.throws(() => ctx.svc.createBill(bill(ctx, { lines: [{ suitId: navyId(ctx), qty: 2 }], received: 8000 })), /Only 1 of Navy Blue Suit left/);
+  ctx.svc.createBill(bill(ctx));
+  assert.throws(() => ctx.svc.createBill(bill(ctx)), /out of stock/);
+  assert.equal(ctx.svc.d.bills.length, 2);
+});
+
+test('stock: a refused bill changes nothing, and a suit that is not counted is never refused', () => {
+  const ctx = setup();
+  ctx.svc.saveSuit({ id: navyId(ctx), name: 'Navy Blue Suit', price: 4000, stock: 1 });
+  const two = [{ suitId: ctx.suits['Black Suit'].id, qty: 1 }, { suitId: navyId(ctx), qty: 2 }];
+  assert.throws(() => ctx.svc.createBill(bill(ctx, { lines: two, received: 20000 })), /Only 1/);
+  assert.equal(ctx.svc.d.counters.billNo, 0);
+  assert.equal(ctx.svc.listSuits().find((x) => x.name === 'Navy Blue Suit').stock, 1);
+  const black = ctx.svc.listSuits().find((x) => x.name === 'Black Suit');
+  assert.equal(black.stock, null);
+  assert.ok(ctx.svc.createBill(bill(ctx, { lines: [{ suitId: black.id, qty: 50 }], received: 225000 })).bill);
+});
+
+test('stock: cancelling a bill puts the suits back', () => {
+  const ctx = setup();
+  ctx.svc.saveSuit({ id: navyId(ctx), name: 'Navy Blue Suit', price: 4000, stock: 5 });
+  const b = ctx.svc.createBill(bill(ctx, { lines: [{ suitId: navyId(ctx), qty: 2 }], received: 8000 })).bill;
+  assert.equal(ctx.svc.listSuits().find((x) => x.name === 'Navy Blue Suit').stock, 3);
+  ctx.svc.cancelBill(b.id, 'customer left');
+  assert.equal(ctx.svc.listSuits().find((x) => x.name === 'Navy Blue Suit').stock, 5);
+});
+
+test('stock in adds to the count and every change is written in the log', () => {
+  const ctx = setup();
+  ctx.svc.addStock({ suitId: navyId(ctx), qty: 10, note: 'Delivery from the supplier' });
+  ctx.svc.addStock({ suitId: navyId(ctx), qty: 5 });
+  ctx.svc.createBill(bill(ctx));
+  assert.equal(ctx.svc.listSuits().find((x) => x.name === 'Navy Blue Suit').stock, 14);
+  const log = ctx.svc.listStockLog();
+  assert.deepEqual(log.map((x) => [x.delta, x.balance]), [[-1, 14], [5, 15], [10, 10]]);
+  assert.match(log[0].reason, /Sold on BS-0001/);
+  assert.equal(log[2].reason, 'Delivery from the supplier');
+  assert.throws(() => ctx.svc.addStock({ suitId: navyId(ctx), qty: 0 }), /whole number/);
+  assert.throws(() => ctx.svc.addStock({ suitId: navyId(ctx), qty: 2.5 }), /whole number/);
+  assert.throws(() => ctx.svc.addStock({ suitId: 99999, qty: 2 }), /not found/);
+});
+
+test('stock: a pasted count list sets counts and reports unknown names', () => {
+  const ctx = setup();
+  const r = ctx.svc.importStock('Navy Blue Suit, 12\nblack suit 7\nGhost Suit, 4\nnonsense line');
+  assert.deepEqual([r.updated, r.unknown, r.skipped], [2, ['Ghost Suit'], ['nonsense line']]);
+  const list = ctx.svc.listSuits();
+  assert.equal(list.find((x) => x.name === 'Navy Blue Suit').stock, 12);
+  assert.equal(list.find((x) => x.name === 'Black Suit').stock, 7);
+});
+
+test('stock: only the owner can add or change stock; staff still see the counts', () => {
+  const ctx = setup();
+  ctx.svc.addStock({ suitId: navyId(ctx), qty: 4 });
+  ctx.svc.saveUser({ username: 'staff1', name: 'Ali', role: 'staff', password: 'ali12345' });
+  ctx.svc.logout();
+  ctx.svc.login('staff1', 'ali12345');
+  assert.throws(() => ctx.svc.addStock({ suitId: navyId(ctx), qty: 1 }), /Only the owner/);
+  assert.throws(() => ctx.svc.importStock('Navy Blue Suit, 1'), /Only the owner/);
+  assert.throws(() => ctx.svc.listStockLog(), /Only the owner/);
+  assert.equal(ctx.svc.listSuits().find((x) => x.name === 'Navy Blue Suit').stock, 4);
+});
+
+test('stock must be a whole number or empty', () => {
+  const ctx = setup();
+  assert.throws(() => ctx.svc.saveSuit({ name: 'X', price: 100, stock: -1 }), /Stock must be/);
+  assert.throws(() => ctx.svc.saveSuit({ name: 'X', price: 100, stock: 1.5 }), /Stock must be/);
+  assert.equal(ctx.svc.saveSuit({ name: 'Y', price: 100, stock: '' }).stock, null);
+  assert.equal(ctx.svc.saveSuit({ name: 'Z', price: 100, stock: '8' }).stock, 8);
+});
+
+// ---------- invoice number ----------
+test('every bill gets a short invoice number that never repeats, and it can be searched', () => {
+  const ctx = setup();
+  const a = ctx.svc.createBill(bill(ctx)).bill;
+  const b = ctx.svc.createBill(bill(ctx)).bill;
+  assert.deepEqual([a.invoice, b.invoice], ['BS-0001', 'BS-0002']);
+  ctx.svc.saveSettings({ invoicePrefix: 'bsf' });
+  const c = ctx.svc.createBill(bill(ctx)).bill;
+  assert.equal(c.invoice, 'BSF-0003');
+  assert.equal(ctx.svc.getBill(a.id).invoice, 'BS-0001'); // old bills keep theirs
+  assert.deepEqual(ctx.svc.searchBills({ text: 'BS-0002' }).map((x) => x.no), [2]);
+  assert.deepEqual(ctx.svc.searchBills({ text: '3' }).map((x) => x.no), [3]);
+  assert.throws(() => ctx.svc.saveSettings({ invoicePrefix: 'TOOLONG' }), /up to 4/);
+  assert.throws(() => ctx.svc.saveSettings({ invoicePrefix: 'B$' }), /up to 4/);
+});
+
+test('settings: exchange note, low stock level and receipt shift are checked', () => {
+  const ctx = setup();
+  assert.equal(ctx.svc.saveSettings({ exchangeNote: 'Exchange within 7 days' }).exchangeNote, 'Exchange within 7 days');
+  assert.throws(() => ctx.svc.saveSettings({ lowStockAt: -1 }), /Low stock/);
+  assert.throws(() => ctx.svc.saveSettings({ receiptOffsetMm: 11 }), /-10 to 10/);
+  assert.throws(() => ctx.svc.saveSettings({ receiptOffsetMm: 1.5 }), /-10 to 10/);
+  assert.equal(ctx.svc.saveSettings({ receiptOffsetMm: -2 }).receiptOffsetMm, -2);
+});
+
+// ---------- forgot password ----------
+test('recovery code: made with the password, never stored as text, and usable while logged out', () => {
+  const ctx = setup();
+  assert.equal(ctx.svc.recoveryInfo().exists, false);
+  assert.throws(() => ctx.svc.createRecoveryCode('wrong-pass'), /password is wrong/);
+  const { code } = ctx.svc.createRecoveryCode('owner1234');
+  assert.match(code, /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/);
+  assert.ok(!JSON.stringify(ctx.svc.d).includes(code.replace(/-/g, '')));
+  ctx.svc.logout();
+  assert.equal(ctx.svc.recoveryInfo().exists, true);
+  assert.equal(ctx.svc.status().hasRecovery, true);
+  const r = ctx.svc.resetWithRecovery(code.toLowerCase().replace(/-/g, ' '), 'brandnew9');
+  assert.match(r.code, /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/);
+  assert.throws(() => ctx.svc.login('owner', 'owner1234'), /Wrong username or password/);
+  assert.equal(ctx.svc.login('owner', 'brandnew9').role, 'owner');
+});
+
+test('recovery code: it works once, a new one is made, and the bills are untouched', () => {
+  const ctx = setup();
+  ctx.svc.createBill(bill(ctx));
+  const { code } = ctx.svc.createRecoveryCode('owner1234');
+  ctx.svc.logout();
+  const next = ctx.svc.resetWithRecovery(code, 'second-pass').code;
+  assert.notEqual(next, code);
+  assert.throws(() => ctx.svc.resetWithRecovery(code, 'third-pass'), /not right/);
+  assert.equal(ctx.svc.resetWithRecovery(next, 'third-pass').code.length, 19);
+  ctx.svc.login('owner', 'third-pass');
+  assert.equal(ctx.svc.searchBills({}).length, 1);
+});
+
+test('recovery code: wrong tries are counted and five in a row lock it for 15 minutes', () => {
+  const ctx = setup();
+  const { code } = ctx.svc.createRecoveryCode('owner1234');
+  ctx.svc.logout();
+  for (let i = 0; i < 5; i++) assert.throws(() => ctx.svc.resetWithRecovery('AAAA-AAAA-AAAA-AAAA', 'whatever1'), /not right/);
+  assert.throws(() => ctx.svc.resetWithRecovery(code, 'whatever1'), /Too many wrong tries.*15 minutes/);
+  ctx.clock.t = new Date(ctx.clock.t.getTime() + 16 * 60000);
+  assert.ok(ctx.svc.resetWithRecovery(code, 'whatever1').code);
+});
+
+test('recovery code: needs a code to exist, a long enough new password, and is owner only to make', () => {
+  const ctx = setup();
+  ctx.svc.logout();
+  assert.throws(() => ctx.svc.resetWithRecovery('AAAA-AAAA-AAAA-AAAA', 'whatever1'), /No recovery code was made/);
+  ctx.svc.login('owner', 'owner1234');
+  const { code } = ctx.svc.createRecoveryCode('owner1234');
+  ctx.svc.saveUser({ username: 'staff1', name: 'Ali', role: 'staff', password: 'ali12345' });
+  ctx.svc.logout();
+  assert.throws(() => ctx.svc.resetWithRecovery(code, 'abc'), /at least 4/);
+  ctx.svc.login('staff1', 'ali12345');
+  assert.throws(() => ctx.svc.createRecoveryCode('ali12345'), /Only the owner/);
+});
+
+test('login accepts the username or the person\'s own name', () => {
+  const ctx = setup();
+  ctx.svc.logout();
+  assert.equal(ctx.svc.login('Zakir', 'owner1234').role, 'owner');
+  ctx.svc.logout();
+  assert.equal(ctx.svc.login('  OWNER ', 'owner1234').role, 'owner');
+  assert.throws(() => ctx.svc.login('nobody', 'owner1234'), /Wrong username/);
+});
+
+test('receipt: 58 mm is centred on the paper, and the shift setting moves it', () => {
+  const ctx = setup();
+  const b = ctx.svc.createBill(bill(ctx)).bill;
+  const set = (o) => ({ ...ctx.svc.getSettings(), ...o });
+  const narrow = buildReceiptHtml(b, set({ paperWidthMm: 58 }));
+  assert.ok(/body \{ width: 48mm; margin: 0 auto;/.test(narrow));
+  assert.ok(/left: 0mm;/.test(narrow));
+  assert.ok(/body \{ width: 72mm; margin: 0 auto;/.test(buildReceiptHtml(b, set({ paperWidthMm: 80 }))));
+  assert.ok(/left: -2mm;/.test(buildReceiptHtml(b, set({ paperWidthMm: 58, receiptOffsetMm: -2 }))));
+});
+
+test('receipt: several of one suit show the price each; the item count is right', () => {
+  const ctx = setup();
+  const b = ctx.svc.createBill(bill(ctx, { lines: [{ suitId: ctx.suits['Navy Blue Suit'].id, qty: 3 }, { suitId: ctx.suits['Black Suit'].id, qty: 1 }], received: 16500 })).bill;
+  const html = buildReceiptHtml(b, ctx.svc.getSettings());
+  assert.ok(html.includes('4 ITEMS SOLD'));
+  assert.ok(html.includes('Rs 4,000 each'));
+  assert.ok(html.includes('Rs 12,000'));
+  assert.ok(html.includes('Rs 16,500'));
+});
+
+// ---------- the day report (PDF page) ----------
+const { buildDayReportHtml } = require('../src/core/report');
+test('day report lists bills, totals, money by method and udhaar, and crosses out cancelled bills', () => {
+  const ctx = setup();
+  ctx.svc.createBill(bill(ctx, { discount: { type: 'pct', value: 10 }, received: 3600 }));
+  const gone = ctx.svc.createBill(bill(ctx, { method: 'JazzCash', received: '' })).bill;
+  ctx.svc.cancelBill(gone.id, 'wrong bill');
+  ctx.svc.createBill(credit(ctx)); // 4000 bill, 1000 paid now
+  const key = ctx.svc.listUdhaar().customers[0].key;
+  ctx.svc.receiveUdhaar({ uid: 'pay-rep-0005', customerKey: key, amount: 500, method: 'Easypaisa' });
+  const report = ctx.svc.dailyReport();
+  const html = buildDayReportHtml(report, ctx.svc.searchBills({ from: report.dateKey, to: report.dateKey }), ctx.svc.getSettings());
+  assert.ok(html.includes('BIN SAAD FABRICS') && html.includes('26-10-2026'));
+  assert.ok(html.includes('BS-0001') && html.includes('BS-0003'));
+  assert.ok(html.includes('class="x"') && html.includes('Cancelled'));
+  assert.ok(html.includes('Rs 7,600')); // sales: 3600 + 4000, the cancelled bill is left out
+  assert.ok(html.includes('Rs 3,000')); // udhaar given
+  assert.ok(html.includes('Rs 500') && html.includes('Easypaisa'));
+  assert.ok(html.includes('Rs 5,100')); // money received: 3600 cash + 1000 cash + 500 Easypaisa
+  assert.ok(!html.includes('profit') && !html.includes('Profit') && !html.includes('cost'));
 });
