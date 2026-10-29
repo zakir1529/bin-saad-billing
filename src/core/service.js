@@ -10,7 +10,7 @@ const PUBLIC_METHODS = [
   'listSuits', 'saveSuit', 'importSuits', 'createBill', 'getBill', 'searchBills', 'cancelBill',
   'dailyReport', 'monthlyReport', 'verifyPassword', 'listUsers', 'saveUser', 'changePassword', 'auditLog',
   'profitReport', 'listUdhaar', 'udhaarCustomer', 'receiveUdhaar',
-  'addStock', 'importStock', 'listStockLog', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
+  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
 ];
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -731,6 +731,29 @@ class Service {
       d.recovery = { salt, hash: hashPassword(normaliseCode(code), salt), createdAt: this.now().toISOString(), fails: 0, lockedUntil: null };
       this._audit(u, 'recovery-code', 'A new recovery code was made');
       return { code, createdAt: d.recovery.createdAt };
+    });
+  }
+
+  // Before opening day: remove every bill, udhaar payment and stock-change record, and put sold pieces back
+  // into stock. Suits, prices, settings, users and the recovery code are kept. Next bill is number 1.
+  clearTestData(password) {
+    const u = this._requireOwner();
+    if (!checkPassword(u, password)) throw new UserError('The password is wrong.');
+    return this.store.run((d) => {
+      const n = d.bills.length;
+      for (const b of d.bills) {
+        if (b.status === 'cancelled') continue; // already put back
+        for (const l of b.lines) {
+          const suit = d.suits.find((x) => x.id === l.suitId);
+          if (suit && suit.stock !== null && suit.stock !== undefined) suit.stock += l.qty;
+        }
+      }
+      d.bills = [];
+      d.payments = [];
+      d.stockLog = [];
+      d.counters.billNo = 0;
+      this._audit(u, 'clear-test-data', n + ' bills removed');
+      return { removed: n };
     });
   }
 

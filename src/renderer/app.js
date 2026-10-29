@@ -740,6 +740,10 @@
         <div><button class="btn primary" data-act="recoveryAsk">${S.recovery && S.recovery.exists ? 'Make a new code' : 'Make a recovery code'}</button></div>
         <div class="muted small">A new code replaces the old one. Keep the paper away from the shop computer.</div></div></div>
 
+      <div class="card"><h2>Start fresh (before opening)</h2><div class="stack" style="margin-top:10px">
+        <div class="muted">Done testing? This removes all test bills, udhaar and profit figures so you begin from zero. Suits, prices and logins stay.</div>
+        <div><button class="btn danger" data-act="clearTestAsk">Clear test data</button></div></div></div>
+
       <div class="card"><h2>Change my password</h2><div class="row wrap" style="margin-top:10px">
         <div class="field-wrap"><label class="field" for="p-o">Current password</label>${pwInput('p-o', 'pw.old', S.pw.old, { label: 'Current password' })}</div>
         <div class="field-wrap"><label class="field" for="p-a">New password</label>${pwInput('p-a', 'pw.a', S.pw.a, { label: 'New password' })}</div>
@@ -830,6 +834,13 @@
         ${pwInput('m-rpw', 'modal.value', m.value || '', { enter: 'modalOk', autofocus: true, label: 'Password' })}
         <div class="err">${esc(m.error)}</div>
         <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Make the code</button></div></div></div></div>`;
+    }
+    if (m.type === 'clearTest') {
+      return `<div class="overlay"><div class="dialog"><h2>Clear all test bills?</h2><div class="stack">
+        <div class="muted small">This deletes <b>every bill</b>, udhaar payment and profit figure, and the next bill becomes number 1. Suits, prices, stock, settings and logins are kept. This cannot be undone. Take a backup first.</div>
+        ${pwInput('m-cpw', 'modal.value', m.value || '', { enter: 'modalOk', autofocus: true, label: 'Password' })}
+        <div class="err">${esc(m.error)}</div>
+        <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Delete all bills</button></div></div></div></div>`;
     }
     if (m.type === 'recovery') {
       return `<div class="overlay"><div class="dialog"><h2>Your recovery code</h2><div class="stack">
@@ -938,6 +949,7 @@
       const input = document.getElementById(id);
       if (input) { input.focus(); const n = input.value.length; try { input.setSelectionRange(n, n); } catch (e) { /* ignore */ } }
     },
+    clearTestAsk() { S.modal = { type: 'clearTest', value: '', error: '' }; S.showPw = {}; render(); },
     recoveryAsk() { S.modal = { type: 'recoveryMake', value: '', error: '' }; S.showPw = {}; render(); },
     stockIn(el) {
       const s = S.prices.all.find((x) => x.id === Number(el.dataset.id));
@@ -1061,6 +1073,12 @@
           S.stock.log = await call('listStockLog', 30);
           m.error = '';
           render();
+        } else if (m.type === 'clearTest') {
+          const r = await call('clearTestData', m.value || '');
+          S.modal = null;
+          S.showPw = {};
+          await reloadSuits();
+          toast(r.removed + ' bills removed. You can start fresh.');
         } else if (m.type === 'recoveryMake') {
           const r = await call('createRecoveryCode', m.value || '');
           S.recovery = await call('recoveryInfo');

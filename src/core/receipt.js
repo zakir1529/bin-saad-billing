@@ -39,7 +39,7 @@ function discountLabel(bill) {
 // It never prints the customer's name or phone, who served, or anything about udhaar.
 function buildReceiptHtml(bill, settings, opts = {}) {
   const narrow = settings.paperWidthMm === 58;
-  const width = narrow ? 48 : 72; // printable width in mm; the page is centred on the paper
+  const width = narrow ? 44 : 68; // printable width in mm; the page is centred on the paper
   const shift = Number(settings.receiptOffsetMm) || 0;
   const row = (l, r, cls) => `<div class="row ${cls || ''}"><span>${l}</span><span>${r}</span></div>`;
   const invoice = bill.invoice || ((settings.invoicePrefix ? settings.invoicePrefix + '-' : '') + String(bill.no).padStart(4, '0'));
@@ -59,7 +59,7 @@ function buildReceiptHtml(bill, settings, opts = {}) {
 @page { margin: 0; }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: #fff; }
-body { width: ${width}mm; margin: 0 auto; position: relative; left: ${shift}mm; padding: 3mm 1.5mm 6mm; font-family: "Segoe UI", Arial, sans-serif; font-size: 12px; line-height: 1.35; color: #000; }
+body { box-sizing: border-box; width: ${width}mm; margin: 0 auto; position: relative; left: ${shift}mm; padding: 3mm 1.5mm 6mm; font-family: "Segoe UI", Arial, sans-serif; font-size: 12px; line-height: 1.35; color: #000; }
 .center { text-align: center; }
 .top { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: .5px; margin-bottom: 5px; }
 .top b { letter-spacing: 2px; }

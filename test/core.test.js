@@ -791,9 +791,9 @@ test('receipt: 58 mm is centred on the paper, and the shift setting moves it', (
   const b = ctx.svc.createBill(bill(ctx)).bill;
   const set = (o) => ({ ...ctx.svc.getSettings(), ...o });
   const narrow = buildReceiptHtml(b, set({ paperWidthMm: 58 }));
-  assert.ok(/body \{ width: 48mm; margin: 0 auto;/.test(narrow));
+  assert.ok(/body \{ box-sizing: border-box; width: 44mm; margin: 0 auto;/.test(narrow));
   assert.ok(/left: 0mm;/.test(narrow));
-  assert.ok(/body \{ width: 72mm; margin: 0 auto;/.test(buildReceiptHtml(b, set({ paperWidthMm: 80 }))));
+  assert.ok(/body \{ box-sizing: border-box; width: 68mm; margin: 0 auto;/.test(buildReceiptHtml(b, set({ paperWidthMm: 80 }))));
   assert.ok(/left: -2mm;/.test(buildReceiptHtml(b, set({ paperWidthMm: 58, receiptOffsetMm: -2 }))));
 });
 
@@ -827,4 +827,17 @@ test('day report lists bills, totals, money by method and udhaar, and crosses ou
   assert.ok(html.includes('Rs 500') && html.includes('Easypaisa'));
   assert.ok(html.includes('Rs 5,100')); // money received: 3600 cash + 1000 cash + 500 Easypaisa
   assert.ok(!html.includes('profit') && !html.includes('Profit') && !html.includes('cost'));
+});
+
+test('clearTestData removes bills, restores stock, keeps suits', () => {
+  const ctx = profitCtx();
+  const before = ctx.svc.listSuits().length;
+  ctx.svc.createBill(plainBill(ctx));
+  assert.throws(() => ctx.svc.clearTestData('wrong'), /wrong/);
+  const r = ctx.svc.clearTestData(ctx.ownerPassword || 'owner1234');
+  assert.equal(r.removed, 1);
+  assert.equal(ctx.svc.searchBills({}).length, 0);
+  assert.equal(ctx.svc.listSuits().length, before);
+  const b = ctx.svc.createBill(plainBill(ctx));
+  assert.match(String(b.bill.invoice), /0001$/);
 });
