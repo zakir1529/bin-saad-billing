@@ -885,3 +885,14 @@ test('one price for all sizes; sizes list in S M L XL order', () => {
   assert.equal(ctx.svc.setBasePrice('Waistcoat Grey', 2800, 1700).changed, 4);
   assert.ok(ctx.svc.listSuits().filter((s) => s.base === 'Waistcoat Grey').every((r) => r.price === 2800 && r.cost === 1700));
 });
+
+test('deleteSuit: only never-sold items; sold ones must be hidden instead', () => {
+  const ctx = profitCtx();
+  ctx.svc.saveSuit({ name: 'Wrong Item', price: 500, stock: 2, group: 'Suits' });
+  const w = ctx.svc.listSuits({ includeInactive: true }).find((s) => s.name === 'Wrong Item');
+  assert.throws(() => ctx.svc.deleteSuit(w.id, 'bad'), /password/);
+  assert.equal(ctx.svc.deleteSuit(w.id, 'owner1234').removed, 1);
+  assert.ok(!ctx.svc.listSuits({ includeInactive: true }).some((s) => s.name === 'Wrong Item'));
+  ctx.svc.createBill(plainBill(ctx));
+  assert.throws(() => ctx.svc.deleteSuit(ctx.plain.id, 'owner1234'), /already sold/);
+});

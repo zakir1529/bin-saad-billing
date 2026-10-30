@@ -58,7 +58,7 @@
     prices: { q: '', all: [] },
     udhaar: { q: '', list: null, sel: null, detail: null, pay: null, busy: false },
     profit: { month: monthKey(), day: '', data: null },
-    dash: null, ledger: null,
+    dash: null, ledger: null, sizeSel: {},
     sales: { day: todayKey(), month: monthKey(), day_data: null, month_data: null },
     reveal: { on: false, today: null, timer: null, unlocked: false },
     showPw: {}, stock: { log: [] },
@@ -462,8 +462,16 @@
           const prices = sibs.map((x) => x.price);
           const lo = Math.min(...prices); const hi = Math.max(...prices);
           const q = sibs.reduce((n, x) => n + (inBill.get(x.id) || 0), 0);
-          return `<button class="tile ${q ? 'in' : ''} ${allOut ? 'out' : ''}" data-act="tileGroup" data-base="${esc(s.base)}" ${allOut ? 'disabled' : ''}>
-            <span class="nm">${esc(s.base)}</span><span><span class="pr num">${lo === hi ? money(lo) : 'from ' + money(lo)}</span><br><span class="stk">${allOut ? 'Out of stock' : 'Choose a size'}</span></span>${q ? `<span class="qty">x${q}</span>` : ''}</button>`;
+          const order = ['S', 'M', 'L', 'XL'];
+          const sorted = sibs.slice().sort((x, y) => order.indexOf(x.size) - order.indexOf(y.size));
+          let cur = sorted.find((x) => x.id === S.sizeSel[s.base]) || sorted.find((x) => stockOf(x) !== 0) || sorted[0];
+          const cst = stockOf(cur);
+          const opts = sorted.map((x) => { const xs = stockOf(x); return `<option value="${x.id}" ${x.id === cur.id ? 'selected' : ''}>Size: ${esc(x.size)}${xs === null ? '' : xs === 0 ? ' (Out of Stock)' : ' (' + xs + ' in stock)'}</option>`; }).join('');
+          return `<div class="tile cardtile ${q ? 'in' : ''}">
+            <span class="nm">${esc(s.base)}</span><span class="muted small">${esc(s.group || '')}</span>
+            <select class="sizesel" data-sizesel="${esc(s.base)}" aria-label="Select size">${opts}</select>
+            <span class="pr num">${money(cur.price)}</span>
+            <button class="btn primary addbtn" data-act="tile" data-id="${cur.id}" ${cst === 0 ? 'disabled' : ''}>${cst === 0 ? 'Out of stock' : '+ Add to Order'}</button>${q ? `<span class="qty">x${q}</span>` : ''}</div>`;
         }
         const st = stockOf(s);
         const low = st !== null && st > 0 && st <= S.settings.lowStockAt;
@@ -871,7 +879,16 @@
         ${m.id ? `<label class="row"><input type="checkbox" data-bind="modal.active" ${m.active ? 'checked' : ''}> Show this suit when billing</label>` : ''}
         <div class="muted small">Changing a price or cost affects new bills only. Old bills keep the price and cost they were sold at. Without a cost price, profit for that suit stays unknown.</div>
         <div class="err">${esc(m.error)}</div>
-        <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Save</button></div></div></div></div>`;
+        <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Save</button></div>
+        ${m.id ? '<div style="border-top:1px solid var(--line);padding-top:10px"><button class="btn danger" data-act="deleteSuitAsk">Delete this item</button></div>' : ''}</div></div></div>`;
+    }
+    if (m.type === 'deleteSuit') {
+      return `<div class="overlay"><div class="dialog"><h2>Delete ${esc(m.name)}?</h2><div class="stack">
+        <div class="muted small">This removes the item from the list for good. It only works for items that were <b>never sold</b>. An item that was already sold can only be hidden, so old bills stay correct.</div>
+        ${m.base ? `<label class="row"><input type="checkbox" data-bind="modal.all" ${m.all ? 'checked' : ''}> Delete all sizes of ${esc(m.base)}</label>` : ''}
+        ${pwInput('m-dpw', 'modal.value', m.value || '', { enter: 'modalOk', autofocus: true, label: 'Password' })}
+        <div class="err">${esc(m.error)}</div>
+        <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn danger grow" data-act="modalOk">Delete</button></div></div></div></div>`;
     }
     if (m.type === 'sizepick') {
       const order = ['S', 'M', 'L', 'XL'];
@@ -1134,6 +1151,7 @@
       render();
     },
 
+    deleteSuitAsk() { const m = S.modal; S.modal = { type: 'deleteSuit', id: m.id, name: m.name, base: m.base || '', all: false, value: '', error: '' }; S.showPw = {}; render(); },
     addSizes() { S.modal = { type: 'sizes', base: '', group: 'Kurtas', price: '', cost: '', zS: '', zM: '', zL: '', zXL: '', error: '' }; render(); },
     sizeCat(el) { S.modal.group = el.dataset.v; render(); },
     profitMonth() { S.profit.day = ''; safe(async () => { if (S.reveal.on) await loadProfit(); render(); }); },
@@ -1213,6 +1231,11 @@
           S.modal = null;
           await reloadSuits();
           toast('Saved.');
+        } else if (m.type === 'deleteSuit') {
+          const r = await call('deleteSuit', m.id, m.value || '', !!m.all);
+          S.modal = null; S.showPw = {};
+          await reloadSuits();
+          toast(r.removed + (r.removed === 1 ? ' item deleted.' : ' items deleted.'));
         } else if (m.type === 'sizes') {
           const sizes = {};
           for (const z of ['S', 'M', 'L', 'XL']) if (m['z' + z] !== '' && m['z' + z] !== undefined) sizes[z] = Number(m['z' + z]);
@@ -1352,6 +1375,7 @@
   document.addEventListener('change', (e) => {
     const el = e.target;
     if (el.dataset.qty) { const line = S.bill.lines.find((l) => l.suitId === Number(el.dataset.qty)); if (line) el.value = line.qty; return; }
+    if (el.dataset.sizesel) { S.sizeSel[el.dataset.sizesel] = Number(el.value); render(); return; }
     if (el.tagName === 'SELECT' && el.dataset.bind) {
       let v = el.value;
       if (el.dataset.kind === 'number') v = Number(v);

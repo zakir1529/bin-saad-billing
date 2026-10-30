@@ -190,3 +190,9 @@ tr.sel td { background: var(--accent-soft); }
 .login a.link:hover { text-decoration: underline; }
 .err { color: var(--danger); min-height: 18px; font-size: 13px; margin-top: 8px; }
 .imgprev { max-height: 56px; max-width: 120px; border: 1px solid var(--line-2); background: #fff; padding: 3px; border-radius: 5px; }
+
+.tile.cardtile { cursor: default; display: flex; flex-direction: column; gap: 7px; }
+.tile.cardtile:hover { background: var(--panel); border-color: var(--line); }
+.tile.cardtile.in { border-color: var(--accent); background: var(--accent-soft); }
+.tile.cardtile .sizesel { width: 100%; padding: 8px 10px; }
+.tile.cardtile .addbtn { width: 100%; justify-content: center; }

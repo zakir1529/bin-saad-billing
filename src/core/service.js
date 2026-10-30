@@ -10,7 +10,7 @@ const PUBLIC_METHODS = [
   'listSuits', 'saveSuit', 'importSuits', 'createBill', 'getBill', 'searchBills', 'cancelBill',
   'dailyReport', 'monthlyReport', 'verifyPassword', 'listUsers', 'saveUser', 'changePassword', 'auditLog',
   'profitReport', 'listUdhaar', 'udhaarCustomer', 'receiveUdhaar',
-  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'setBasePrice', 'dashboard', 'ledger', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
+  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'setBasePrice', 'deleteSuit', 'dashboard', 'ledger', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
 ];
 
 const SIZES = ['S', 'M', 'L', 'XL'];
@@ -345,6 +345,24 @@ class Service {
 
   // Kurtas and waistcoats come in sizes. Each size is kept as its own item ("Kurta Black (M)") so stock,
   // bills, cancelling and profit all keep working exactly as before; the screens group them by base name.
+  // Delete an item that was never sold (a wrong or test item). Sold items can only be hidden, so old bills stay correct.
+  deleteSuit(id, password, allSizes) {
+    const u = this._requireOwner();
+    if (!checkPassword(u, password)) throw new UserError('The password is wrong.');
+    const one = this.d.suits.find((x) => x.id === id);
+    if (!one) throw new UserError('That item was not found.');
+    const rows = allSizes && one.base ? this.d.suits.filter((x) => x.base === one.base) : [one];
+    const ids = new Set(rows.map((x) => x.id));
+    const sold = rows.filter((x) => this.d.bills.some((b) => b.lines.some((l) => l.suitId === x.id)));
+    if (sold.length) throw new UserError(`${sold.map((x) => x.name).join(', ')} ${sold.length === 1 ? 'was' : 'were'} already sold, so ${sold.length === 1 ? 'it' : 'they'} cannot be deleted. Turn off "Show this suit when billing" instead.`);
+    return this.store.run((d) => {
+      d.suits = d.suits.filter((x) => !ids.has(x.id));
+      d.stockLog = d.stockLog.filter((x) => !ids.has(x.suitId));
+      this._audit(u, 'suit-delete', rows.map((x) => x.name).join(', '));
+      return { removed: rows.length };
+    });
+  }
+
   // One price and cost for every size of an item (Kurta Black S, M, L, XL).
   setBasePrice(base, price, cost) {
     const u = this._requireOwner();
