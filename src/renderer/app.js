@@ -320,7 +320,7 @@
     const shop = esc(S.status.shopName);
     if (S.status.needsSetup) {
       return `<div class="login"><div class="box">
-        <h1>${shop}</h1><div class="sub">First time set-up. Create the owner password.</div>
+        <img class="loginlogo" src="logo.jpg" alt="${shop}"><div class="sub">First time set-up. Create the owner password.</div>
         <div class="stack">
           <div><label class="field" for="l-name">Your name</label><input id="l-name" type="text" data-bind="login.name" value="${esc(L.name)}"></div>
           <div><label class="field" for="l-pw">Password (at least 4 characters)</label>${pwInput('l-pw', 'login.password', L.password, { enter: 'setup', label: 'Password' })}</div>
@@ -349,7 +349,7 @@
           <button class="btn primary big" data-act="codeDone">I have written it down. Go to log in</button></div></div></div>`;
     }
     return `<div class="login"><div class="box">
-      <h1>${shop}</h1><div class="sub">Please log in</div>
+      <img class="loginlogo" src="logo.jpg" alt="${shop}"><div class="sub">Please log in</div>
       <div class="stack">
         <div><label class="field" for="l-user">Username or name</label><input id="l-user" type="text" data-bind="login.username" data-enter="login" value="${esc(L.username)}" placeholder="owner" autocomplete="off" data-autofocus="1"></div>
         <div><label class="field" for="l-pw">Password</label>${pwInput('l-pw', 'login.password', L.password, { enter: 'login', label: 'Password' })}</div>
@@ -368,7 +368,7 @@
     const backupWarn = S.info && S.info.backupFolderSet && S.info.lastBackup && S.info.lastBackup.ok === false;
     return `<div class="shell">
       <nav class="nav">
-        <div class="brand"><b>${esc(S.settings.shopName.toUpperCase())}</b><span>Billing</span></div>
+        <div class="brand"><img class="brandlogo" src="logo.jpg" alt="${esc(S.settings.shopName)}"></div>
         ${items.map(([v, label]) => `<button class="item ${S.view === v ? 'on' : ''}" data-act="nav" data-view="${v}">${label}</button>`).join('')}
         <div class="who"><b>${esc(S.user.name)}</b>${owner ? 'Owner' : 'Staff'}<br><button data-act="logout">Log out</button></div>
       </nav>

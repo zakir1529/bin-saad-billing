@@ -46,7 +46,10 @@ h2 { font-size: 15px; }
 #app { height: 100%; }
 .shell { display: flex; height: 100%; }
 .nav { width: 208px; flex: none; background: var(--nav); color: var(--nav-ink); display: flex; flex-direction: column; padding: 20px 12px; gap: 3px; border-right: 1px solid #1b1e24; }
-.brand { padding: 4px 10px 20px; color: #f3efe6; }
+.brand { padding: 4px 10px 20px; color: #f3efe6; text-align: center; }
+.brandlogo { display: block; width: 100%; max-width: 168px; height: auto; margin: 0 auto 6px; mix-blend-mode: lighten; }
+.loginlogo { display: block; width: 240px; max-width: 100%; height: auto; margin: -6px auto 12px; mix-blend-mode: lighten; }
+.login .sub { text-align: center; }
 .brand b { display: block; font-size: 16px; letter-spacing: 1.4px; font-weight: 700; line-height: 1.2; }
 .brand span { display: block; margin-top: 4px; font-size: 10.5px; color: var(--accent); letter-spacing: 2.2px; text-transform: uppercase; }
 .nav button.item { text-align: left; background: none; border: 0; color: var(--nav-ink); padding: 11px 13px; border-radius: 8px; font-size: 14px; position: relative; }
