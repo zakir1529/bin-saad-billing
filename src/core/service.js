@@ -10,7 +10,7 @@ const PUBLIC_METHODS = [
   'listSuits', 'saveSuit', 'importSuits', 'createBill', 'getBill', 'searchBills', 'cancelBill',
   'dailyReport', 'monthlyReport', 'verifyPassword', 'listUsers', 'saveUser', 'changePassword', 'auditLog',
   'profitReport', 'listUdhaar', 'udhaarCustomer', 'receiveUdhaar',
-  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'dashboard', 'ledger', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
+  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'setBasePrice', 'dashboard', 'ledger', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
 ];
 
 const SIZES = ['S', 'M', 'L', 'XL'];
@@ -314,7 +314,8 @@ class Service {
   listSuits({ includeInactive } = {}) {
     const u = this._requireUser();
     const all = includeInactive && u.role === 'owner';
-    const list = clone(this.d.suits.filter((s) => all || s.active)).sort((a, b) => a.name.localeCompare(b.name));
+    const zi = (z) => SIZES.indexOf(z);
+    const list = clone(this.d.suits.filter((s) => all || s.active)).sort((a, b) => (a.base || a.name).localeCompare(b.base || b.name) || zi(a.size) - zi(b.size) || a.name.localeCompare(b.name));
     for (const s of list) if (s.stock === undefined) s.stock = null; // null = this suit is not being counted
     if (u.role !== 'owner') for (const s of list) delete s.cost; // staff never see what a suit costs the shop
     return list;
@@ -344,6 +345,19 @@ class Service {
 
   // Kurtas and waistcoats come in sizes. Each size is kept as its own item ("Kurta Black (M)") so stock,
   // bills, cancelling and profit all keep working exactly as before; the screens group them by base name.
+  // One price and cost for every size of an item (Kurta Black S, M, L, XL).
+  setBasePrice(base, price, cost) {
+    const u = this._requireOwner();
+    const v = this._checkSuit({ name: String(base || 'x'), price, cost });
+    return this.store.run((d) => {
+      const rows = d.suits.filter((x) => x.base === base);
+      if (!rows.length) throw new UserError('No sizes found for that item.');
+      for (const x of rows) { x.price = v.price; x.cost = v.cost; }
+      this._audit(u, 'suit-price-all-sizes', `${base} -> ${v.price}`);
+      return { changed: rows.length };
+    });
+  }
+
   saveSuitSizes(input = {}) {
     const u = this._requireOwner();
     const base = String(input.base || '').trim().replace(/\s+/g, ' ');

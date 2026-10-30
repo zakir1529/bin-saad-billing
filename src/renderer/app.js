@@ -437,7 +437,21 @@
     } else if (!list.length) {
       tiles = '<div class="empty" style="grid-column:1/-1">No suit matches this search.</div>';
     } else {
+      const seen = new Set();
       tiles = list.map((s) => {
+        if (s.base && s.size) {
+          if (seen.has(s.base)) return '';
+          seen.add(s.base);
+          const sibs = list.filter((x) => x.base === s.base);
+          const counted = sibs.filter((x) => stockOf(x) !== null);
+          const total = counted.reduce((n, x) => n + x.stock, 0);
+          const allOut = counted.length === sibs.length && total === 0;
+          const prices = sibs.map((x) => x.price);
+          const lo = Math.min(...prices); const hi = Math.max(...prices);
+          const q = sibs.reduce((n, x) => n + (inBill.get(x.id) || 0), 0);
+          return `<button class="tile ${q ? 'in' : ''} ${allOut ? 'out' : ''}" data-act="tileGroup" data-base="${esc(s.base)}" ${allOut ? 'disabled' : ''}>
+            <span class="nm">${esc(s.base)}</span><span><span class="pr num">${lo === hi ? money(lo) : 'from ' + money(lo)}</span><br><span class="stk">${allOut ? 'Out of stock' : 'Choose a size'}</span></span>${q ? `<span class="qty">x${q}</span>` : ''}</button>`;
+        }
         const st = stockOf(s);
         const low = st !== null && st > 0 && st <= S.settings.lowStockAt;
         const stk = st === null ? '' : st === 0 ? '<span class="stk out">Out of stock</span>' : `<span class="stk ${low ? 'low' : ''}">${low ? 'Only ' + st + ' left' : st + ' in stock'}</span>`;
@@ -840,10 +854,22 @@
           <div class="field-wrap"><label class="field" for="m-cost">Cost price (Rs.), for profit</label><input id="m-cost" type="text" inputmode="numeric" data-bind="modal.cost" data-kind="digits" data-enter="modalOk" value="${esc(m.cost)}" placeholder="Optional"></div></div>
         <div class="row"><div class="field-wrap"><label class="field" for="m-group">Group (optional)</label><input id="m-group" list="groups" type="text" data-bind="modal.group" data-enter="modalOk" value="${esc(m.group)}"><datalist id="groups">${groups.map((g) => `<option value="${esc(g)}">`).join('')}</datalist></div>
           <div class="field-wrap"><label class="field" for="m-stock">In stock now</label><input id="m-stock" type="text" inputmode="numeric" data-bind="modal.stock" data-kind="digits" data-enter="modalOk" value="${esc(m.stock)}" placeholder="Empty = not counted"></div></div>
+        ${m.base ? `<label class="row"><input type="checkbox" data-bind="modal.allSizes" ${m.allSizes ? 'checked' : ''}> Use this price and cost for all sizes of ${esc(m.base)}</label>` : ''}
         ${m.id ? `<label class="row"><input type="checkbox" data-bind="modal.active" ${m.active ? 'checked' : ''}> Show this suit when billing</label>` : ''}
         <div class="muted small">Changing a price or cost affects new bills only. Old bills keep the price and cost they were sold at. Without a cost price, profit for that suit stays unknown.</div>
         <div class="err">${esc(m.error)}</div>
         <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Save</button></div></div></div></div>`;
+    }
+    if (m.type === 'sizepick') {
+      const order = ['S', 'M', 'L', 'XL'];
+      const sibs = S.suits.filter((x) => x.base === m.base).sort((a, b) => order.indexOf(a.size) - order.indexOf(b.size));
+      const inB = new Map(S.bill.lines.map((l) => [l.suitId, l.qty]));
+      return `<div class="overlay"><div class="dialog"><h2>${esc(m.base)}: choose a size</h2><div class="stack">
+        <div class="tiles" style="grid-template-columns:repeat(2,1fr)">${sibs.map((x) => {
+          const st = stockOf(x);
+          return `<button class="tile ${inB.has(x.id) ? 'in' : ''} ${st === 0 ? 'out' : ''}" data-act="pickSize" data-id="${x.id}" ${st === 0 ? 'disabled' : ''}><span class="nm">${esc(x.size)}</span><span><span class="pr num">${money(x.price)}</span><br><span class="stk ${st === 0 ? 'out' : ''}">${st === null ? '' : st === 0 ? 'Out of stock' : st + ' in stock'}</span></span>${inB.has(x.id) ? `<span class="qty">x${inB.get(x.id)}</span>` : ''}</button>`;
+        }).join('')}</div>
+        <div class="row"><button class="btn grow" data-act="modalCancel">Close</button></div></div></div></div>`;
     }
     if (m.type === 'sizes') {
       const cats = ['Suits', 'Kurtas', 'Waistcoats', 'Shawls'];
@@ -1050,6 +1076,8 @@
     eye: () => toggleReveal(),
 
     tile: (el) => addSuit(Number(el.dataset.id)),
+    tileGroup(el) { S.modal = { type: 'sizepick', base: el.dataset.base }; render(); },
+    pickSize(el) { S.modal = null; addSuit(Number(el.dataset.id)); },
     group: (el) => { S.group = el.dataset.v; render(); },
     searchEnter() {
       const q = S.search.trim().toLowerCase();
@@ -1101,7 +1129,7 @@
     addSuit() { S.modal = { type: 'suit', id: null, name: '', price: '', cost: '', stock: '', group: '', active: true, error: '' }; render(); },
     editSuit(el) {
       const s = S.prices.all.find((x) => x.id === Number(el.dataset.id));
-      S.modal = { type: 'suit', id: s.id, name: s.name, price: String(s.price), cost: s.cost === null || s.cost === undefined ? '' : String(s.cost), stock: stockOf(s) === null ? '' : String(s.stock), group: s.group || '', active: s.active, error: '' };
+      S.modal = { type: 'suit', id: s.id, name: s.name, price: String(s.price), cost: s.cost === null || s.cost === undefined ? '' : String(s.cost), stock: stockOf(s) === null ? '' : String(s.stock), group: s.group || '', active: s.active, base: s.base || '', allSizes: !!s.base, error: '' };
       render();
     },
     async pickUdhaar(el) {
@@ -1168,6 +1196,7 @@
           render();
         } else if (m.type === 'suit') {
           await call('saveSuit', { id: m.id, name: m.name, price: m.price === '' ? 0 : Number(m.price), cost: m.cost === '' ? '' : Number(m.cost), stock: m.stock === '' ? '' : Number(m.stock), group: m.group, active: m.active });
+          if (m.base && m.allSizes) await call('setBasePrice', m.base, m.price === '' ? 0 : Number(m.price), m.cost === '' ? '' : Number(m.cost));
           S.modal = null;
           await reloadSuits();
           toast('Saved.');

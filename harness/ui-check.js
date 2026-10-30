@@ -311,7 +311,14 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   check('sizes were added: Kurta Black (M) is in the price list', (await text('.content')).includes('Kurta Black (M)'), (await text('.toast')));
   await nav('billing');
   await page.click('.chip:has-text("Kurtas")');
-  check('checkout filters by category and shows the sizes', (await text('.tiles')).includes('Kurta Black (L)') && !(await text('.tiles')).includes('Navy Blue'), await text('.tiles'));
+  check('checkout shows one Kurta Black button, filtered by category', (await text('.tiles')).includes('Choose a size') && !(await text('.tiles')).includes('Navy Blue') && !(await text('.tiles')).includes('(L)'), await text('.tiles'));
+  await page.click('[data-act=tileGroup]');
+  await page.waitForSelector('.dialog');
+  check('the size picker lists S, M, L with their stock', (await text('.dialog')).includes('5 in stock') && (await text('.dialog')).includes('3 in stock'), await text('.dialog'));
+  await shot('22b-size-picker');
+  await page.click('[data-act=pickSize]:has-text("5 in stock")');
+  await page.waitForTimeout(200);
+  check('picking a size adds Kurta Black (M) to the bill', (await text('.content')).includes('Kurta Black (M)'), (await text('.content')).slice(0, 300));
   await shot('22-checkout-kurtas');
   await nav('ledger');
   await page.click('.content [data-act=eye]'); await page.waitForTimeout(300);

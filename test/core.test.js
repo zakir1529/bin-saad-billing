@@ -876,3 +876,12 @@ test('profit for a single day, by category; delete-by-date and the lock', () => 
   assert.throws(() => ctx.svc.clearTestData('owner1234'), /no longer/);
   assert.throws(() => ctx.svc.clearTestBefore('owner1234', '2999-01-01'), /no longer/);
 });
+
+test('one price for all sizes; sizes list in S M L XL order', () => {
+  const ctx = profitCtx();
+  ctx.svc.saveSuitSizes({ base: 'Waistcoat Grey', group: 'Waistcoats', price: 2500, cost: 1500, sizes: { XL: 1, S: 2, L: 3, M: 4 } });
+  const rows = ctx.svc.listSuits().filter((s) => s.base === 'Waistcoat Grey');
+  assert.deepEqual(rows.map((r) => r.size), ['S', 'M', 'L', 'XL']);
+  assert.equal(ctx.svc.setBasePrice('Waistcoat Grey', 2800, 1700).changed, 4);
+  assert.ok(ctx.svc.listSuits().filter((s) => s.base === 'Waistcoat Grey').every((r) => r.price === 2800 && r.cost === 1700));
+});
