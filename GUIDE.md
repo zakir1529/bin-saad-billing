@@ -110,3 +110,11 @@ Tested by the developer's tools (all passing):
 - **Receipt** is the new SALES style, centred on 58 mm and 80 mm paper. Exchange line is editable in Settings.
 - **Daily sales PDF:** Sales tab > "Download this day (PDF)" (saved in Documents\Bin Saad Reports).
 - **Safety:** errors are logged and the screen recovers; a backup is made on close.
+
+## Version 3
+- **Dashboard** is the first screen: today's bills, pieces sold, Udhaar owed, recent bills, items running low.
+- **Sizes:** Inventory > "Add with sizes" makes Kurta/Waistcoat items in S, M, L, XL, each with its own stock ("Kurta Black (M)"). Shawls and suits have no size.
+- **Analytics** (was Profit): pick a month, or a single day; profit by category.
+- **Ledger:** stock worth (at cost and at selling price), today and yesterday, best seller, total since opening.
+- **Start fresh:** Settings > "Delete test bills before a date" (type CLEAR + password; a backup is made first). On opening day tap **Start real sales** to switch test-clearing off for good.
+- Lighter receipt: bold only on the shop name, items and TOTAL DUE.

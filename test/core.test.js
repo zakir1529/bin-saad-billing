@@ -841,3 +841,38 @@ test('clearTestData removes bills, restores stock, keeps suits', () => {
   const b = ctx.svc.createBill(plainBill(ctx));
   assert.match(String(b.bill.invoice), /0001$/);
 });
+
+test('sizes: each size is its own item; stock per size; dashboard and ledger work', () => {
+  const ctx = profitCtx();
+  const r = ctx.svc.saveSuitSizes({ base: 'Kurta Black', group: 'Kurtas', price: 3000, cost: 2000, sizes: { S: 2, M: 5, L: 3, XL: 1 } });
+  assert.equal(r.added, 4);
+  const items = ctx.svc.listSuits().filter((s) => s.name.startsWith('Kurta Black'));
+  assert.equal(items.length, 4);
+  const m = items.find((s) => s.name === 'Kurta Black (M)');
+  assert.equal(m.stock, 5); assert.equal(m.size, 'M'); assert.equal(m.base, 'Kurta Black');
+  ctx.svc.createBill(bill(ctx, { lines: [{ suitId: m.id, qty: 2 }], received: 6000 }));
+  assert.equal(ctx.svc.listSuits().find((s) => s.id === m.id).stock, 3);
+  const dsh = ctx.svc.dashboard();
+  assert.equal(dsh.bills >= 1, true);
+  const led = ctx.svc.ledger();
+  assert.ok(led.stock.pieces > 0 && led.today >= 6000);
+  assert.throws(() => ctx.svc.saveSuitSizes({ base: 'X', price: 100, sizes: {} }), /size/);
+});
+
+test('profit for a single day, by category; delete-by-date and the lock', () => {
+  const ctx = profitCtx();
+  ctx.svc.saveSuit({ name: 'Shawl A', price: 2000, cost: 1000, stock: 4, group: 'Shawls' });
+  const sh = ctx.svc.listSuits().find((s) => s.name === 'Shawl A');
+  const b = ctx.svc.createBill(bill(ctx, { lines: [{ suitId: sh.id, qty: 1 }], received: 2000 })).bill;
+  const day = ctx.svc.profitReport(b.dateKey);
+  assert.equal(day.isDay, true);
+  assert.equal(day.byCategory.find((c) => c.name === 'Shawls').profit, 1000);
+  assert.equal(ctx.svc.clearTestBefore('owner1234', '2000-01-01').removed, 0);
+  assert.equal(ctx.svc.listSuits().find((s) => s.id === sh.id).stock, 3);
+  assert.equal(ctx.svc.clearTestBefore('owner1234', '2999-01-01').removed >= 1, true);
+  assert.equal(ctx.svc.listSuits().find((s) => s.id === sh.id).stock, 4);
+  assert.throws(() => ctx.svc.startRealSales('wrong'), /wrong/);
+  ctx.svc.startRealSales('owner1234');
+  assert.throws(() => ctx.svc.clearTestData('owner1234'), /no longer/);
+  assert.throws(() => ctx.svc.clearTestBefore('owner1234', '2999-01-01'), /no longer/);
+});

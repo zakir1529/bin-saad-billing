@@ -64,32 +64,32 @@ body { box-sizing: border-box; width: ${width}mm; margin: 0 auto; position: rela
 .top { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: .5px; margin-bottom: 5px; }
 .top b { letter-spacing: 2px; }
 .logo { max-width: 40mm; max-height: 22mm; margin: 0 auto 3px; display: block; }
-.shop { font-size: ${narrow ? 18 : 24}px; font-weight: 800; letter-spacing: ${narrow ? 2 : 4}px; line-height: 1.1; margin: 2px 0 4px; }
+.shop { font-size: ${narrow ? 18 : 24}px; font-weight: 700; letter-spacing: ${narrow ? 1 : 3}px; line-height: 1.1; margin: 2px 0 4px; }
 .small { font-size: 11px; }
-.solid { border-top: 2px solid #000; margin: 5px 0; }
+.solid { border-top: 1.5px solid #000; margin: 5px 0; }
 .thin { border-top: 1px solid #000; margin: 4px 0; }
 .dash { border-top: 1px dashed #000; margin: 5px 0; }
 .dots { border-top: 1px dotted #000; margin: 4px 0; }
 .info { margin: 6px 0 4px; }
-.info .row span:first-child { font-weight: 800; font-size: 11px; letter-spacing: .5px; }
+.info .row span:first-child { font-weight: 600; font-size: 11px; letter-spacing: .5px; }
 .row { display: flex; justify-content: space-between; gap: 8px; }
 .row > span:last-child { text-align: right; white-space: nowrap; }
 .row.small { font-size: 11px; }
-.head { display: grid; grid-template-columns: ${narrow ? 22 : 28}px 1fr auto; gap: 6px; font-weight: 800; font-size: 12px; padding: 3px 0; border-top: 2px solid #000; border-bottom: 2px solid #000; margin-top: 6px; }
+.head { display: grid; grid-template-columns: ${narrow ? 22 : 28}px 1fr auto; gap: 6px; font-weight: 600; font-size: 12px; padding: 3px 0; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; margin-top: 6px; }
 .head span:last-child { text-align: right; }
 .item { display: grid; grid-template-columns: ${narrow ? 22 : 28}px 1fr auto; gap: 6px; padding: 5px 0 4px; border-bottom: 1px dotted #000; }
-.item .q { font-weight: 700; }
+.item .q { font-weight: 600; }
 .item .n b { font-size: 12.5px; }
 .item .each { font-size: 10.5px; }
-.item .p { font-weight: 700; white-space: nowrap; text-align: right; }
-.sold { text-align: center; font-weight: 800; font-size: 12px; letter-spacing: 1.5px; padding: 4px 0; border-bottom: 2px solid #000; margin-bottom: 4px; }
+.item .p { font-weight: 600; white-space: nowrap; text-align: right; }
+.sold { text-align: center; font-weight: 600; font-size: 12px; letter-spacing: 1.5px; padding: 4px 0; border-bottom: 1.5px solid #000; margin-bottom: 4px; }
 .sums .row { padding: 1px 0; font-size: 12px; }
 .due { display: flex; justify-content: space-between; align-items: baseline; font-weight: 800; padding: 3px 0 2px; margin: 4px 0 0; border-top: 1px dashed #000; border-bottom: 1px dashed #000; }
 .due span { font-size: ${narrow ? 10.5 : 14}px; letter-spacing: ${narrow ? 0 : .5}px; white-space: nowrap; }
 .due b { font-size: ${narrow ? 16 : 22}px; white-space: nowrap; }
 .pay { margin-top: 3px; font-size: ${narrow ? 10.5 : 12}px; }
 .pay .row span:first-child { white-space: nowrap; }
-.thanks { font-weight: 800; font-size: 11.5px; letter-spacing: 1px; text-transform: uppercase; margin-top: 3px; }
+.thanks { font-weight: 600; font-size: 11.5px; letter-spacing: 1px; text-transform: uppercase; margin-top: 3px; }
 .exch { font-size: 10.5px; margin-top: 2px; }
 .qr { width: 28mm; height: 28mm; margin: 6px auto 0; display: block; }
 .stamp { text-align: center; font-weight: 800; font-size: 13px; border: 2px solid #000; padding: 2px 0; margin: 0 0 6px; letter-spacing: 4px; }

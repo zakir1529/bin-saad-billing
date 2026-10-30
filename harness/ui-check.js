@@ -34,7 +34,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   const firstCode = (await text('.dialog .codebox')).trim();
   check('first set-up shows a recovery code to write down', /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/.test(firstCode), firstCode);
   await page.click('[data-act=modalCancel]');
-  await page.waitForSelector('.shell');
+  await page.waitForSelector('.shell'); await page.waitForTimeout(150); await page.click('[data-act=nav][data-view=billing]'); await page.waitForTimeout(150);
   check('owner is logged in after set-up', (await text('.nav .who')).includes('Owner'));
 
   // price list: paste a list
@@ -198,7 +198,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   // ---------- cost price, udhaar and profit: each in its own tab ----------
   const navAll = await text('.nav');
   check('left menu has separate tabs: Checkout, Inventory, Bills, Udhaar, Profit, Sales, Settings',
-    ['Checkout', 'Inventory', 'Bills', 'Udhaar', 'Profit', 'Sales', 'Settings'].every((t) => navAll.includes(t)), navAll);
+    ['Dashboard', 'Checkout', 'Inventory', 'Bills', 'Udhaar', 'Analytics', 'Ledger', 'Sales', 'Settings'].every((t) => navAll.includes(t)), navAll);
 
   await nav('inventory');
   check('price list hides cost and profit until the eye is clicked', !/Rs\. 3,000/.test(await text('.content')) && (await text('.content')).includes('not set'));
@@ -275,7 +275,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.click('[data-act=logout]');
   await page.waitForSelector('#l-user');
   await page.fill('#l-user', 'ali'); await page.fill('#l-pw', 'ali12345'); await page.click('[data-act=login]');
-  await page.waitForSelector('.shell');
+  await page.waitForSelector('.shell'); await page.waitForTimeout(150); await page.click('[data-act=nav][data-view=billing]'); await page.waitForTimeout(150);
   const navTxt = await text('.nav');
   check('staff does not see Sales, Settings, Udhaar or Profit', !navTxt.includes('Sales') && !navTxt.includes('Settings') && !navTxt.includes('Udhaar') && !navTxt.includes('Profit') && navTxt.includes('Checkout') && navTxt.includes('Inventory'));
   check("staff top bar has no sales chip", (await page.locator('.chip-eye').count()) === 0);
@@ -291,6 +291,44 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await shot('13-staff-prices');
 
   // the receipt itself, as it would come out of the printer (58mm and 80mm)
+  // ---------- new: dashboard, ledger, sizes, analytics by day, lock ----------
+  await page.click('[data-act=logout]');
+  await page.waitForSelector('#l-user');
+  await page.fill('#l-user', 'owner'); await page.fill('#l-pw', 'owner1234'); await page.click('[data-act=login]');
+  await page.waitForSelector('.shell');
+  await page.waitForTimeout(800); 
+  await page.waitForFunction(() => document.querySelector('.content').innerText.toLowerCase().includes('recent bills'), null, { timeout: 4000 }).catch(() => {});
+  check('dashboard is the first screen and shows recent bills and low stock', (await text('.content')).toLowerCase().includes('needs attention'), await text('.content'));
+  await shot('20-dashboard');
+  await nav('inventory');
+  await page.click('[data-act=addSizes]');
+  await page.fill('#m-base', 'Kurta Black'); await page.click('[data-act=sizeCat][data-v=Kurtas]');
+  await page.fill('#m-sp', '3000'); await page.fill('#m-sc', '2000');
+  await page.fill('#m-zS', '2'); await page.fill('#m-zM', '5'); await page.fill('#m-zL', '3');
+  await shot('21-sizes-dialog');
+  await page.click('[data-act=modalOk]');
+  await page.waitForTimeout(400);
+  check('sizes were added: Kurta Black (M) is in the price list', (await text('.content')).includes('Kurta Black (M)'), (await text('.toast')));
+  await nav('billing');
+  await page.click('.chip:has-text("Kurtas")');
+  check('checkout filters by category and shows the sizes', (await text('.tiles')).includes('Kurta Black (L)') && !(await text('.tiles')).includes('Navy Blue'), await text('.tiles'));
+  await shot('22-checkout-kurtas');
+  await nav('ledger');
+  await page.click('.content [data-act=eye]'); await page.waitForTimeout(300);
+  if (await page.$('#m-pw')) { await page.fill('#m-pw', 'owner1234'); await page.keyboard.press('Enter'); }
+  await page.waitForFunction(() => /Rs\. \d/.test(document.querySelector('.content').innerText));
+  check('ledger shows stock worth and totals', (await text('.content')).includes('Stock worth'), (await text('.content')).slice(0, 300));
+  await shot('23-ledger');
+  await nav('profit');
+  await page.fill('#pday', '2026-10-30'); await page.waitForTimeout(400);
+  check('analytics can show a single day', (await text('.content')).includes('One day'), (await text('.content')).slice(0, 200));
+  await shot('24-analytics-day');
+  await nav('settings');
+  check('settings has delete-by-date and the lock', (await text('.content')).includes('Delete test bills before a date') && (await text('.content')).includes('Start real sales'), '');
+  await page.click('[data-act=goLiveAsk]');
+  await page.fill('#m-cpw', 'owner1234'); await page.click('[data-act=modalOk]'); await page.waitForTimeout(400);
+  check('after Start real sales the clear buttons are gone', !(await text('.content')).includes('Clear all test data') && (await text('.content')).includes('switched off'), (await text('.toast')));
+
   const p2 = await browser.newPage({ viewport: { width: 380, height: 700 } });
   await p2.goto(BASE + '/__printed?n=0');
   await p2.screenshot({ path: `${OUT}/14-receipt-80mm.png`, fullPage: true });

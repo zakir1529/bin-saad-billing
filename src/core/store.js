@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS = {
   invoicePrefix: 'BS', // invoice numbers look like BS-0042
   exchangeNote: 'Exchange possible within 3 days with receipt.', // printed at the bottom of the receipt
   lowStockAt: 3, // a suit with this many or fewer left is marked Low
+  liveLocked: false, // true once real selling starts: test-data clearing is then switched off for good
   receiptOffsetMm: 0, // moves the receipt left (minus) or right (plus) if the printer is off-centre
 };
 

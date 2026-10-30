@@ -10,9 +10,10 @@ const PUBLIC_METHODS = [
   'listSuits', 'saveSuit', 'importSuits', 'createBill', 'getBill', 'searchBills', 'cancelBill',
   'dailyReport', 'monthlyReport', 'verifyPassword', 'listUsers', 'saveUser', 'changePassword', 'auditLog',
   'profitReport', 'listUdhaar', 'udhaarCustomer', 'receiveUdhaar',
-  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
+  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'dashboard', 'ledger', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
 ];
 
+const SIZES = ['S', 'M', 'L', 'XL'];
 const pad2 = (n) => String(n).padStart(2, '0');
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
@@ -339,6 +340,40 @@ class Service {
       }
     }
     return { name, price, cost, stock, group: String(input.group || '').trim().slice(0, 30) };
+  }
+
+  // Kurtas and waistcoats come in sizes. Each size is kept as its own item ("Kurta Black (M)") so stock,
+  // bills, cancelling and profit all keep working exactly as before; the screens group them by base name.
+  saveSuitSizes(input = {}) {
+    const u = this._requireOwner();
+    const base = String(input.base || '').trim().replace(/\s+/g, ' ');
+    if (!base) throw new UserError('Enter the item name.');
+    const sizes = SIZES.filter((z) => input.sizes && input.sizes[z] !== undefined && input.sizes[z] !== null && input.sizes[z] !== false);
+    if (!sizes.length) throw new UserError('Choose at least one size.');
+    const group = String(input.group || '').trim().slice(0, 30);
+    const checked = sizes.map((z) => {
+      const v = this._checkSuit({ name: `${base} (${z})`, price: input.price, cost: input.cost, stock: input.sizes[z] === true ? null : input.sizes[z], group });
+      return { z, v };
+    });
+    return this.store.run((d) => {
+      let added = 0;
+      let updated = 0;
+      for (const { z, v } of checked) {
+        let s = d.suits.find((x) => x.name.toLowerCase() === v.name.toLowerCase());
+        const isNew = !s;
+        if (isNew) { s = { id: ++d.counters.id, active: true, stock: null }; d.suits.push(s); }
+        const oldStock = s.stock === undefined ? null : s.stock;
+        const { stock: newStock, ...rest } = v;
+        Object.assign(s, rest, { base, size: z, active: true });
+        if (newStock !== undefined) {
+          s.stock = newStock;
+          if (newStock !== null && newStock !== oldStock) this._logStock(d, s, newStock - (oldStock || 0), isNew ? 'Opening stock' : 'Count corrected', u);
+        }
+        if (isNew) added++; else updated++;
+      }
+      this._audit(u, 'suit-sizes', `${base}: ${sizes.join(', ')}`);
+      return { added, updated };
+    });
   }
 
   saveSuit(input = {}) {
@@ -734,27 +769,110 @@ class Service {
     });
   }
 
+  _removeBills(d, keep) {
+    const gone = d.bills.filter((b) => !keep(b));
+    for (const b of gone) {
+      if (b.status === 'cancelled') continue; // already put back
+      for (const l of b.lines) {
+        const suit = d.suits.find((x) => x.id === l.suitId);
+        if (suit && suit.stock !== null && suit.stock !== undefined) suit.stock += l.qty;
+      }
+    }
+    d.bills = d.bills.filter(keep);
+    return gone;
+  }
+
+  _requireTestPhase(password) {
+    const u = this._requireOwner();
+    if (this.d.settings.liveLocked) throw new UserError('Real sales have started, so test data can no longer be cleared.');
+    if (!checkPassword(u, password)) throw new UserError('The password is wrong.');
+    return u;
+  }
+
   // Before opening day: remove every bill, udhaar payment and stock-change record, and put sold pieces back
   // into stock. Suits, prices, settings, users and the recovery code are kept. Next bill is number 1.
   clearTestData(password) {
-    const u = this._requireOwner();
-    if (!checkPassword(u, password)) throw new UserError('The password is wrong.');
+    const u = this._requireTestPhase(password);
     return this.store.run((d) => {
-      const n = d.bills.length;
-      for (const b of d.bills) {
-        if (b.status === 'cancelled') continue; // already put back
-        for (const l of b.lines) {
-          const suit = d.suits.find((x) => x.id === l.suitId);
-          if (suit && suit.stock !== null && suit.stock !== undefined) suit.stock += l.qty;
-        }
-      }
-      d.bills = [];
+      const gone = this._removeBills(d, () => false);
       d.payments = [];
       d.stockLog = [];
       d.counters.billNo = 0;
-      this._audit(u, 'clear-test-data', n + ' bills removed');
-      return { removed: n };
+      this._audit(u, 'clear-test-data', gone.length + ' bills removed');
+      return { removed: gone.length };
     });
+  }
+
+  // Remove only the bills made before a date (the test days). Later bills are never touched.
+  clearTestBefore(password, dateKey) {
+    const u = this._requireTestPhase(password);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey))) throw new UserError('Pick a date.');
+    return this.store.run((d) => {
+      const gone = this._removeBills(d, (b) => b.dateKey >= dateKey);
+      const ids = new Set(gone.map((b) => b.id));
+      d.payments = d.payments.filter((p) => p.dateKey >= dateKey);
+      if (!d.bills.length) d.counters.billNo = 0;
+      this._audit(u, 'clear-test-before', `${gone.length} bills before ${dateKey} removed`);
+      return { removed: ids.size };
+    });
+  }
+
+  // Switches test-data clearing off for good. Used on opening day.
+  startRealSales(password) {
+    const u = this._requireOwner();
+    if (!checkPassword(u, password)) throw new UserError('The password is wrong.');
+    return this.store.run((d) => {
+      d.settings.liveLocked = true;
+      this._audit(u, 'start-real-sales', 'Test-data clearing switched off');
+      return { locked: true };
+    });
+  }
+
+  // Home screen figures. Staff get the bill list and low stock only; money figures are owner-only.
+  dashboard() {
+    const u = this._requireUser();
+    const owner = u.role === 'owner';
+    const today = dateKeyOf(this.now());
+    const paid = this.d.bills.filter((b) => b.status === 'paid');
+    const todays = paid.filter((b) => b.dateKey === today);
+    const low = this.d.suits.filter((x) => x.active && x.stock !== null && x.stock !== undefined && x.stock <= this.d.settings.lowStockAt)
+      .sort((a, b) => a.stock - b.stock).slice(0, 12).map((x) => ({ id: x.id, name: x.name, stock: x.stock }));
+    const recent = this.d.bills.slice(-6).reverse().map((b) => ({ id: b.id, invoice: b.invoice, at: b.createdAt, total: b.total, method: b.method, status: b.status }));
+    const out = { bills: todays.length, items: todays.reduce((n, b) => n + b.lines.reduce((m, l) => m + l.qty, 0), 0), low, recent };
+    if (owner) {
+      out.sales = todays.reduce((n, b) => n + b.total, 0);
+      out.udhaarOwed = [...this._udhaarCustomers().values()].reduce((n, c) => n + Math.max(0, c.balance), 0);
+    }
+    return out;
+  }
+
+  // Owner only: what the stock is worth, today and yesterday, best seller today, total since opening.
+  ledger() {
+    this._requireOwner();
+    const now = this.now();
+    const today = dateKeyOf(now);
+    const y = new Date(now.getTime()); y.setDate(y.getDate() - 1);
+    const yest = dateKeyOf(y);
+    const paid = this.d.bills.filter((b) => b.status === 'paid');
+    const sum = (k) => paid.filter((b) => b.dateKey === k).reduce((n, b) => n + b.total, 0);
+    let atCost = 0; let atPrice = 0; let pieces = 0; let uncosted = 0;
+    const cats = new Map();
+    for (const x of this.d.suits) {
+      if (!x.active || x.stock === null || x.stock === undefined) continue;
+      pieces += x.stock; atPrice += x.stock * x.price;
+      if (x.cost === null || x.cost === undefined) uncosted++; else atCost += x.stock * x.cost;
+      const g = x.group || 'Other';
+      const c = cats.get(g) || { name: g, pieces: 0, atPrice: 0 };
+      c.pieces += x.stock; c.atPrice += x.stock * x.price; cats.set(g, c);
+    }
+    const sold = new Map();
+    for (const b of paid.filter((q) => q.dateKey === today)) for (const l of b.lines) sold.set(l.name, (sold.get(l.name) || 0) + l.qty);
+    const top = [...sold.entries()].sort((a, b) => b[1] - a[1])[0];
+    return {
+      today: sum(today), yesterday: sum(yest), lifetime: paid.reduce((n, b) => n + b.total, 0), bills: paid.length,
+      stock: { pieces, atCost, atPrice, uncosted, byCategory: [...cats.values()].sort((a, b) => b.atPrice - a.atPrice) },
+      topToday: top ? { name: top[0], qty: top[1] } : null,
+    };
   }
 
   recoveryInfo() {
@@ -823,12 +941,32 @@ class Service {
     this._requireOwner();
     const now = this.now();
     const key = ym || `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
-    if (!/^\d{4}-\d{2}$/.test(key)) throw new UserError('Pick a month.');
-    const [y, m] = key.split('-').map(Number);
-    const prevKey = m === 1 ? `${y - 1}-12` : `${y}-${pad2(m - 1)}`;
-    const inMonth = (k) => this.d.bills.filter((b) => b.status === 'paid' && b.dateKey.startsWith(k + '-'));
+    const isDay = /^\d{4}-\d{2}-\d{2}$/.test(key);
+    if (!isDay && !/^\d{4}-\d{2}$/.test(key)) throw new UserError('Pick a month or a day.');
+    let prevKey;
+    if (isDay) {
+      const dt = new Date(key + 'T12:00:00');
+      dt.setDate(dt.getDate() - 1);
+      prevKey = dateKeyOf(dt);
+    } else {
+      const [y, m] = key.split('-').map(Number);
+      prevKey = m === 1 ? `${y - 1}-12` : `${y}-${pad2(m - 1)}`;
+    }
+    const inMonth = (k) => this.d.bills.filter((b) => b.status === 'paid' && (k.length === 10 ? b.dateKey === k : b.dateKey.startsWith(k + '-')));
     const bills = inMonth(key);
     const totals = this._profitTotals(bills);
+    const groupOf = new Map(this.d.suits.map((x) => [x.id, x.group || 'Other']));
+    const cats = new Map();
+    for (const b of bills) {
+      if (b.costTotal === null || b.costTotal === undefined) continue;
+      for (const l of b.lines) {
+        const g = groupOf.get(l.suitId) || 'Other';
+        const x = cats.get(g) || { name: g, qty: 0, sales: 0, cost: 0 };
+        x.qty += l.qty; x.sales += l.amount; x.cost += l.cost * l.qty;
+        cats.set(g, x);
+      }
+    }
+    const byCategory = [...cats.values()].map((x) => ({ ...x, profit: x.sales - x.cost })).sort((a, b) => b.profit - a.profit);
     const days = new Map();
     const suits = new Map();
     for (const b of bills) {
@@ -852,7 +990,7 @@ class Service {
       .sort((a, b) => b.profit - a.profit);
     const missingCost = this.d.suits.filter((x) => x.active && (x.cost === null || x.cost === undefined)).map((x) => x.name).sort();
     const prev = this._profitTotals(inMonth(prevKey));
-    return { ym: key, ...totals, byDay, bySuit, missingCost, prev: { ym: prevKey, profit: prev.profit, known: prev.known } };
+    return { ym: key, isDay, ...totals, byDay, bySuit, byCategory, missingCost, prev: { ym: prevKey, profit: prev.profit, known: prev.known } };
   }
 
   // ---------- udhaar (money customers still owe) ----------

@@ -16,7 +16,7 @@ let service = null;
 let lastBackup = { ok: null, at: null, error: '', target: '' };
 let backupTimer = null;
 
-const MUTATING = new Set(['createBill', 'cancelBill', 'saveSuit', 'importSuits', 'saveUser', 'saveSettings', 'setupOwner', 'changePassword', 'receiveUdhaar', 'addStock', 'importStock', 'createRecoveryCode', 'resetWithRecovery']);
+const MUTATING = new Set(['createBill', 'cancelBill', 'saveSuit', 'importSuits', 'saveUser', 'saveSettings', 'setupOwner', 'changePassword', 'receiveUdhaar', 'addStock', 'importStock', 'createRecoveryCode', 'resetWithRecovery', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes']);
 
 // ---------- a small log file, and nothing is allowed to crash the program ----------
 function logLine(text) {
@@ -301,6 +301,7 @@ function registerIpc() {
   ipcMain.handle('api', async (_event, method, args) => {
     try {
       let value;
+      if (method === 'clearTestData' || method === 'clearTestBefore') runBackup(); // a safety copy just before the old bills are removed
       if (Object.prototype.hasOwnProperty.call(EXTRA, method)) value = await EXTRA[method](...(args || []));
       else value = service.call(method, args);
       if (MUTATING.has(method)) scheduleBackup(4000);

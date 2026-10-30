@@ -57,7 +57,8 @@
     bills: { text: '', from: '', to: '', state: '', list: null, sel: null, preview: null },
     prices: { q: '', all: [] },
     udhaar: { q: '', list: null, sel: null, detail: null, pay: null, busy: false },
-    profit: { month: monthKey(), data: null },
+    profit: { month: monthKey(), day: '', data: null },
+    dash: null, ledger: null,
     sales: { day: todayKey(), month: monthKey(), day_data: null, month_data: null },
     reveal: { on: false, today: null, timer: null, unlocked: false },
     showPw: {}, stock: { log: [] },
@@ -95,13 +96,14 @@
 
   async function afterLogin(user) {
     S.user = user;
-    S.view = 'billing';
+    S.view = 'dashboard';
     S.settings = await call('getSettings');
     S.suits = await call('listSuits', {});
     S.bill = newBill();
     S.done = null;
     refreshInfo();
     render();
+    go('dashboard');
   }
 
   async function refreshInfo() {
@@ -228,6 +230,7 @@
     S.reveal.on = true;
     if (S.view === 'sales') await loadSales();
     if (S.view === 'profit') await loadProfit();
+    if (S.view === 'ledger') await loadLedger();
     clearTimeout(S.reveal.timer);
     S.reveal.timer = setTimeout(hideReveal, REVEAL_MS);
     render();
@@ -239,8 +242,9 @@
     await doReveal();
   }
   async function loadProfit() {
-    S.profit.data = await call('profitReport', S.profit.month || monthKey());
+    S.profit.data = await call('profitReport', S.profit.day || S.profit.month || monthKey());
   }
+  async function loadLedger() { S.ledger = await call('ledger'); }
   async function loadUdhaar() {
     const U = S.udhaar;
     U.list = await call('listUdhaar');
@@ -263,6 +267,8 @@
     render();
     await safe(async () => {
       if (view === 'billing') S.suits = await call('listSuits', {});
+      if (view === 'dashboard') S.dash = await call('dashboard');
+      if (view === 'ledger' && S.reveal.on) await loadLedger();
       if (view === 'bills') await loadBills();
       if (view === 'inventory') {
         await reloadSuits();
@@ -353,12 +359,12 @@
       </div></div></div>`;
   }
 
-  const TITLES = { billing: 'Checkout', inventory: 'Inventory', bills: 'Bills', udhaar: 'Udhaar', profit: 'Profit', sales: 'Sales', settings: 'Settings' };
+  const TITLES = { dashboard: 'Dashboard', ledger: 'Ledger', billing: 'Checkout', inventory: 'Inventory', bills: 'Bills', udhaar: 'Udhaar', profit: 'Analytics', sales: 'Sales', settings: 'Settings' };
 
   function shell(content) {
     const owner = S.user.role === 'owner';
-    const items = [['billing', 'Checkout'], ['inventory', 'Inventory'], ['bills', 'Bills']];
-    if (owner) items.push(['udhaar', 'Udhaar'], ['profit', 'Profit'], ['sales', 'Sales'], ['settings', 'Settings']);
+    const items = [['dashboard', 'Dashboard'], ['billing', 'Checkout'], ['inventory', 'Inventory'], ['bills', 'Bills']];
+    if (owner) items.push(['udhaar', 'Udhaar'], ['profit', 'Analytics'], ['ledger', 'Ledger'], ['sales', 'Sales'], ['settings', 'Settings']);
     const backupWarn = S.info && S.info.backupFolderSet && S.info.lastBackup && S.info.lastBackup.ok === false;
     return `<div class="shell">
       <nav class="nav">
@@ -374,6 +380,49 @@
         </div>
         <div class="content" ${S.view === 'billing' ? 'style="overflow:hidden"' : ''}>${content}</div>
       </div></div>`;
+  }
+
+  // ----- dashboard -----
+  function viewDashboard() {
+    const d = S.dash;
+    if (!d) return '<div class="empty">Loading...</div>';
+    const owner = S.user.role === 'owner';
+    const on = S.reveal.on;
+    const v = (n) => (on ? money(n) : DOTS);
+    const tile = (k, val, sub) => `<div class="stat"><div class="k">${k}</div><div class="v num">${val}</div>${sub ? '<div class="muted small" style="margin-top:4px">' + sub + '</div>' : ''}</div>`;
+    return `<div class="stats">
+        ${owner ? tile("Today's sales", v(d.sales || 0), d.bills + ' bill' + (d.bills === 1 ? '' : 's')) : tile('Bills today', d.bills)}
+        ${tile('Pieces sold today', d.items)}
+        ${owner ? tile('Udhaar owed', v(d.udhaarOwed || 0), 'money customers still owe') : ''}
+        ${tile('Low or out of stock', d.low.length, d.low.length ? 'see the list below' : 'all good')}
+      </div>
+      <div class="row wrap" style="margin:14px 0"><button class="btn primary" data-act="nav" data-view="billing">New bill</button>
+        ${owner ? '<button class="btn" data-act="nav" data-view="inventory">Add stock</button><button class="btn" data-act="nav" data-view="udhaar">Udhaar</button>' + eyeBtn() : ''}</div>
+      <div class="split">
+        <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Recent bills</th><th>Time</th><th class="right">Total</th></tr></thead><tbody>
+          ${d.recent.map((b) => `<tr><td><b>${esc(b.invoice || '')}</b> ${b.status === 'cancelled' ? '<span class="pill off">Cancelled</span>' : ''}</td><td>${esc(when(b.at))}</td><td class="right num">${money(b.total)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">No bills yet.</td></tr>'}</tbody></table></div>
+        <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Needs attention</th><th class="right">Left</th></tr></thead><tbody>
+          ${d.low.map((x) => `<tr><td>${esc(x.name)}</td><td class="right">${x.stock === 0 ? '<span class="pill bad">Out</span>' : '<span class="pill warn">' + x.stock + '</span>'}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">Nothing is running low.</td></tr>'}</tbody></table></div>
+      </div>`;
+  }
+
+  // ----- ledger (owner, hidden until the eye is clicked) -----
+  function viewLedger() {
+    const on = S.reveal.on;
+    const L = on ? S.ledger : null;
+    const v = (n) => (on && L ? money(n) : DOTS);
+    const tile = (k, val, sub) => `<div class="stat"><div class="k">${k}</div><div class="v num">${val}</div>${sub ? '<div class="muted small" style="margin-top:4px">' + sub + '</div>' : ''}</div>`;
+    return `<div class="card row between" style="margin-bottom:12px"><div class="muted">${on ? 'Figures are visible for a few seconds, then hide again.' : 'The ledger is hidden. Click the eye to show it.'}</div>${eyeBtn()}</div>
+      <div class="stats">
+        ${tile('Stock worth (at cost)', v(L ? L.stock.atCost : 0), L && L.stock.uncosted ? L.stock.uncosted + ' items have no cost set' : '')}
+        ${tile('Stock worth (at selling price)', v(L ? L.stock.atPrice : 0), L ? L.stock.pieces + ' pieces counted' : '')}
+        ${tile("Today's sales", v(L ? L.today : 0))}
+        ${tile("Yesterday's sales", v(L ? L.yesterday : 0))}
+        ${tile('Total since opening', v(L ? L.lifetime : 0), L ? L.bills + ' bills' : '')}
+        ${tile('Best seller today', on && L ? (L.topToday ? esc(L.topToday.name) + ' x' + L.topToday.qty : '-') : DOTS)}
+      </div>
+      ${L && L.stock.byCategory.length ? `<div class="card" style="padding:0;overflow:hidden;margin-top:12px"><table><thead><tr><th>Stock by category</th><th class="right">Pieces</th><th class="right">Worth</th></tr></thead><tbody>
+        ${L.stock.byCategory.map((c) => `<tr><td>${esc(c.name)}</td><td class="right num">${c.pieces}</td><td class="right num">${money(c.atPrice)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
   }
 
   // ----- billing -----
@@ -549,7 +598,7 @@
       </div>
       <div class="card row wrap" style="margin-bottom:12px">
         <div class="field-wrap" style="min-width:240px"><label class="field" for="pq">Search the suits</label><input id="pq" type="text" data-bind="prices.q" data-rerender="1" value="${esc(S.prices.q)}" placeholder="Suit name or group"></div>
-        ${owner ? '<div style="align-self:flex-end" class="row wrap"><button class="btn primary" data-act="addSuit">Add a suit</button><button class="btn" data-act="pasteList">Paste a list</button><button class="btn" data-act="pasteStock">Paste stock counts</button>' + eyeBtn() + '</div>' : '<div class="muted small" style="align-self:flex-end">Only the owner can change prices and stock.</div>'}
+        ${owner ? '<div style="align-self:flex-end" class="row wrap"><button class="btn primary" data-act="addSuit">Add a suit</button><button class="btn primary" data-act="addSizes">Add with sizes</button><button class="btn" data-act="pasteList">Paste a list</button><button class="btn" data-act="pasteStock">Paste stock counts</button>' + eyeBtn() + '</div>' : '<div class="muted small" style="align-self:flex-end">Only the owner can change prices and stock.</div>'}
       </div>
       <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Suit</th><th>Group</th><th class="right">Price</th>${owner ? '<th class="right">Cost</th><th class="right">Profit each</th>' : ''}<th class="right">In stock</th><th>Status</th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="${owner ? 8 : 5}" class="empty">No suits yet.</td></tr>`}</tbody></table></div>
@@ -622,8 +671,11 @@
       : (on && p && p.missingCost.length ? `<div class="muted small" style="margin-top:8px">Suits with no cost price yet: ${p.missingCost.map(esc).join(', ')}.</div>` : '');
     return `<div class="card row between" style="margin-bottom:12px">
         <div class="muted">${on ? 'Figures are visible for a few seconds, then hide again.' : 'Profit is hidden. Click the eye to show it.'}</div>${eyeBtn()}</div>
-      <div class="row wrap" style="margin-bottom:10px"><h2>One month</h2>
-        <input type="month" id="pmonth" data-bind="profit.month" data-profit="1" value="${esc(S.profit.month)}" style="width:170px" aria-label="Pick a month"></div>
+      <div class="row wrap" style="margin-bottom:10px"><h2>${S.profit.day ? 'One day' : 'One month'}</h2>
+        <input type="month" id="pmonth" data-bind="profit.month" data-profit="1" data-clearday="1" value="${esc(S.profit.month)}" style="width:170px" aria-label="Pick a month">
+        <span class="muted">or a single day</span>
+        <input type="date" id="pday" data-bind="profit.day" data-profit="1" value="${esc(S.profit.day)}" style="width:170px" aria-label="Pick a day">
+        ${S.profit.day ? '<button class="btn small" data-act="profitMonth">Whole month</button>' : ''}</div>
       <div class="stats">
         <div class="stat"><div class="k">Profit</div><div class="v num">${v(p ? p.profit : 0)}</div><div class="muted small" style="margin-top:4px">${diff}</div></div>
         <div class="stat"><div class="k">Sales counted</div><div class="v num">${v(p ? p.sales : 0)}</div></div>
@@ -632,6 +684,8 @@
         <div class="stat"><div class="k">Margin (profit out of sales)</div><div class="v num">${margin}</div></div>
       </div>
       ${warn}
+      ${on && p && p.byCategory.length ? `<div class="card" style="padding:0;overflow:hidden;margin-top:12px"><table><thead><tr><th>Category</th><th class="right">Sold</th><th class="right">Sales</th><th class="right">Profit</th></tr></thead><tbody>
+          ${p.byCategory.map((x) => `<tr><td>${esc(x.name)}</td><td class="right num">${x.qty}</td><td class="right num">${money(x.sales)}</td><td class="right num"><b>${money(x.profit)}</b></td></tr>`).join('')}</tbody></table></div>` : ''}
       ${on && p ? `<div class="split" style="margin-top:12px">
         <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Day</th><th class="right">Sales</th><th class="right">Cost</th><th class="right">Profit</th></tr></thead><tbody>
           ${p.byDay.map((x) => `<tr><td>${dayLabel(x.dateKey)}</td><td class="right num">${money(x.sales)}</td><td class="right num">${money(x.cost)}</td><td class="right num"><b>${money(x.profit)}</b></td></tr>`).join('') || '<tr><td colspan="4" class="empty">No sales this month.</td></tr>'}</tbody></table></div>
@@ -742,7 +796,7 @@
 
       <div class="card"><h2>Start fresh (before opening)</h2><div class="stack" style="margin-top:10px">
         <div class="muted">Done testing? This removes all test bills, udhaar and profit figures so you begin from zero. Suits, prices and logins stay.</div>
-        <div><button class="btn danger" data-act="clearTestAsk">Clear test data</button></div></div></div>
+        ${S.settings.liveLocked ? '<div class="pill ok" style="align-self:flex-start">Real sales have started. Test clearing is switched off.</div>' : `<div class="row wrap"><button class="btn danger" data-act="clearBeforeAsk">Delete test bills before a date</button><button class="btn danger" data-act="clearTestAsk">Clear all test data</button><button class="btn primary" data-act="goLiveAsk">Start real sales (lock this)</button></div>`}</div></div>
 
       <div class="card"><h2>Change my password</h2><div class="row wrap" style="margin-top:10px">
         <div class="field-wrap"><label class="field" for="p-o">Current password</label>${pwInput('p-o', 'pw.old', S.pw.old, { label: 'Current password' })}</div>
@@ -790,6 +844,28 @@
         <div class="muted small">Changing a price or cost affects new bills only. Old bills keep the price and cost they were sold at. Without a cost price, profit for that suit stays unknown.</div>
         <div class="err">${esc(m.error)}</div>
         <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Save</button></div></div></div></div>`;
+    }
+    if (m.type === 'sizes') {
+      const cats = ['Suits', 'Kurtas', 'Waistcoats', 'Shawls'];
+      return `<div class="overlay"><div class="dialog"><h2>Add an item with sizes</h2><div class="stack">
+        <div><label class="field" for="m-base">Item name (for example Kurta Black)</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}"></div>
+        <div class="chips">${cats.map((g) => `<button class="chip ${m.group === g ? 'on' : ''}" data-act="sizeCat" data-v="${g}">${g}</button>`).join('')}</div>
+        <div class="row"><div class="field-wrap"><label class="field" for="m-sp">Selling price (Rs.)</label><input id="m-sp" type="text" inputmode="numeric" data-bind="modal.price" data-kind="digits" value="${esc(m.price)}"></div>
+          <div class="field-wrap"><label class="field" for="m-sc">Cost price (Rs.)</label><input id="m-sc" type="text" inputmode="numeric" data-bind="modal.cost" data-kind="digits" value="${esc(m.cost)}" placeholder="Optional"></div></div>
+        <div class="muted small">How many pieces of each size are in the shop? Leave a size empty if you do not stock it.</div>
+        <div class="row">${['S', 'M', 'L', 'XL'].map((z) => `<div class="field-wrap"><label class="field" for="m-z${z}">${z}</label><input id="m-z${z}" type="text" inputmode="numeric" data-bind="modal.z${z}" data-kind="digits" value="${esc(m['z' + z])}"></div>`).join('')}</div>
+        <div class="err">${esc(m.error)}</div>
+        <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Save sizes</button></div></div></div></div>`;
+    }
+    if (m.type === 'clearBefore' || m.type === 'goLive') {
+      const live = m.type === 'goLive';
+      return `<div class="overlay"><div class="dialog"><h2>${live ? 'Start real sales?' : 'Delete test bills before a date'}</h2><div class="stack">
+        <div class="muted small">${live ? 'After this, the Clear test data buttons are removed for good, so real bills can never be wiped by a slip. This cannot be undone.' : 'Bills made <b>before</b> this date are deleted and their pieces go back into stock. Bills from this date on are kept. A backup copy is made first.'}</div>
+        ${live ? '' : `<div><label class="field" for="m-date">Delete bills before</label><input id="m-date" type="date" data-bind="modal.date" value="${esc(m.date)}"></div>
+        <div><label class="field" for="m-word">Type CLEAR to confirm</label><input id="m-word" type="text" data-bind="modal.word" value="${esc(m.word)}"></div>`}
+        ${pwInput('m-cpw', 'modal.value', m.value || '', { enter: 'modalOk', label: 'Password' })}
+        <div class="err">${esc(m.error)}</div>
+        <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">${live ? 'Start real sales' : 'Delete test bills'}</button></div></div></div></div>`;
     }
     if (m.type === 'paste') {
       return `<div class="overlay"><div class="dialog wide"><h2>Paste a list of suits</h2><div class="stack">
@@ -872,7 +948,7 @@
     let html;
     if (!S.user) html = viewLogin();
     else {
-      const views = { billing: viewBilling, bills: viewBills, inventory: viewInventory, udhaar: viewUdhaar, profit: viewProfit, sales: viewSales, settings: viewSettings };
+      const views = { dashboard: viewDashboard, ledger: viewLedger, billing: viewBilling, bills: viewBills, inventory: viewInventory, udhaar: viewUdhaar, profit: viewProfit, sales: viewSales, settings: viewSettings };
       html = shell(views[S.view]());
     }
     html += modalHtml();
@@ -1017,6 +1093,11 @@
       render();
     },
 
+    addSizes() { S.modal = { type: 'sizes', base: '', group: 'Kurtas', price: '', cost: '', zS: '', zM: '', zL: '', zXL: '', error: '' }; render(); },
+    sizeCat(el) { S.modal.group = el.dataset.v; render(); },
+    profitMonth() { S.profit.day = ''; safe(async () => { if (S.reveal.on) await loadProfit(); render(); }); },
+    clearBeforeAsk() { S.modal = { type: 'clearBefore', value: '', date: todayKey(), word: '', error: '' }; S.showPw = {}; render(); },
+    goLiveAsk() { S.modal = { type: 'goLive', value: '', error: '' }; S.showPw = {}; render(); },
     addSuit() { S.modal = { type: 'suit', id: null, name: '', price: '', cost: '', stock: '', group: '', active: true, error: '' }; render(); },
     editSuit(el) {
       const s = S.prices.all.find((x) => x.id === Number(el.dataset.id));
@@ -1090,6 +1171,24 @@
           S.modal = null;
           await reloadSuits();
           toast('Saved.');
+        } else if (m.type === 'sizes') {
+          const sizes = {};
+          for (const z of ['S', 'M', 'L', 'XL']) if (m['z' + z] !== '' && m['z' + z] !== undefined) sizes[z] = Number(m['z' + z]);
+          const r = await call('saveSuitSizes', { base: m.base, group: m.group, price: m.price === '' ? 0 : Number(m.price), cost: m.cost === '' ? '' : Number(m.cost), sizes });
+          S.modal = null;
+          await reloadSuits();
+          toast(r.added + ' sizes added' + (r.updated ? ', ' + r.updated + ' updated' : '') + '.');
+        } else if (m.type === 'clearBefore') {
+          if (m.word !== 'CLEAR') throw new Error('Type the word CLEAR to confirm.');
+          const r = await call('clearTestBefore', m.value || '', m.date);
+          S.modal = null; S.showPw = {};
+          await reloadSuits();
+          toast(r.removed + ' test bills removed.');
+        } else if (m.type === 'goLive') {
+          await call('startRealSales', m.value || '');
+          S.settings = await call('getSettings'); S.form = { ...S.settings, paymentMethodsText: S.settings.paymentMethods.join(', ') };
+          S.modal = null; S.showPw = {};
+          toast('Real sales have started. Test clearing is now off.');
         } else if (m.type === 'paste') {
           if (m.result) { S.modal = null; render(); return; }
           m.result = await call('importSuits', m.text);
@@ -1204,6 +1303,7 @@
     if (el.dataset.rerender) render();
     if (el.dataset.bills) loadBillsSoon();
     if (el.dataset.sales && S.reveal.on) safe(async () => { await loadSales(); render(); });
+    if (el.dataset.clearday) S.profit.day = '';
     if (el.dataset.profit && S.reveal.on) safe(async () => { await loadProfit(); render(); });
   });
 
