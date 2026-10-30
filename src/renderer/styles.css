@@ -52,7 +52,9 @@ h2 { font-size: 15px; }
 .login .sub { text-align: center; }
 .brand b { display: block; font-size: 16px; letter-spacing: 1.4px; font-weight: 700; line-height: 1.2; }
 .brand span { display: block; margin-top: 4px; font-size: 10.5px; color: var(--accent); letter-spacing: 2.2px; text-transform: uppercase; }
-.nav button.item { text-align: left; background: none; border: 0; color: var(--nav-ink); padding: 11px 13px; border-radius: 8px; font-size: 14px; position: relative; }
+.nav button.item { text-align: left; background: none; border: 0; color: var(--nav-ink); padding: 11px 13px; border-radius: 8px; font-size: 14px; position: relative; display: flex; align-items: center; gap: 11px; }
+.nav button.item .ico { flex: none; opacity: .85; }
+.nav button.item.on .ico { color: var(--accent); opacity: 1; }
 .nav button.item:hover { background: #171a20; color: #e6e3db; }
 .nav button.item.on { background: #1d2027; color: #fff; font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
 .nav .who { margin-top: auto; padding: 12px 10px 4px; font-size: 12px; color: #8d9097; border-top: 1px solid #1d2027; }
