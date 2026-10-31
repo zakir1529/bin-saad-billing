@@ -19,15 +19,10 @@ jobs:
       - name: Install
         run: npm install
       - name: Run the billing tests
-        shell: bash
-        run: |
-          set +e
-          npm test > test-out.txt 2>&1
-          code=$?
-          if [ $code -ne 0 ]; then
-            grep -E "^not ok|^\s+error:|^\s+(expected|actual):|^\s+message:|Error" test-out.txt | head -20 | while IFS= read -r l; do echo "::error::${l:0:300}"; done
-          fi
-          exit $code
+        run: npm test
+      - name: Set the version from the build number
+        shell: pwsh
+        run: npm version "1.0.${{ github.run_number }}" --no-git-tag-version
       - name: Build the Windows installer
         run: npm run dist
         env:
@@ -41,6 +36,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "build-${{ github.run_number }}"
-          Get-ChildItem dist -Filter *.exe | ForEach-Object { Write-Host $_.Name ($_.Length) }
-          gh release create $tag (Get-ChildItem dist -Filter *.exe | ForEach-Object { $_.FullName }) --title "Bin Saad Billing $tag" --notes "Setup installer and portable version. Run the Setup file to install, or the portable file to run without installing." --latest
+          $tag = "v1.0.${{ github.run_number }}"
+          Get-ChildItem dist -File | ForEach-Object { Write-Host $_.Name ($_.Length) }
+          gh release create $tag (Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe','.blockmap' -or $_.Name -eq 'latest.yml' } | ForEach-Object { $_.FullName }) --title "Bin Saad Billing $tag" --notes "Setup installer and portable version. Run the Setup file to install, or the portable file to run without installing." --latest

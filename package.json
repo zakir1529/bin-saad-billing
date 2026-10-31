@@ -49,7 +49,21 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Bin Saad Billing"
+      "shortcutName": "Bin Saad Billing",
+      "artifactName": "Bin-Saad-Billing-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "zakir1529",
+        "repo": "bin-saad-billing"
+      }
+    ],
+    "portable": {
+      "artifactName": "Bin-Saad-Billing-Portable-${version}.${ext}"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   }
 }

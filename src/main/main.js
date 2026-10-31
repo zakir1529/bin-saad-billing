@@ -59,8 +59,33 @@ function start() {
   registerIpc();
   createWindow();
   scheduleBackup(2000);
+  setupAutoUpdate();
   setInterval(emailTick, 5 * 60000);
   setTimeout(emailTick, 60000);
+}
+
+// Checks GitHub for a newer version, downloads it quietly, then asks before installing.
+// Never touches the data file. Does nothing when run from source or offline.
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;
+  let autoUpdater;
+  try { ({ autoUpdater } = require('electron-updater')); } catch (e) { logLine('updater missing: ' + e.message); return; }
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = null;
+  autoUpdater.on('error', (e) => logLine('update check: ' + (e && e.message)));
+  autoUpdater.on('update-downloaded', async (info) => {
+    const w = BrowserWindow.getAllWindows()[0];
+    const r = await dialog.showMessageBox(w || undefined, {
+      type: 'info', buttons: ['Install now', 'Later'], defaultId: 0, cancelId: 1,
+      title: 'Update ready', message: 'A new version of Bin Saad Billing is ready.',
+      detail: 'Your bills and data are not touched. Choose Later to install it when you close the program.',
+    });
+    if (r.response === 0) { runBackup(); autoUpdater.quitAndInstall(); }
+  });
+  const check = () => { autoUpdater.checkForUpdates().catch((e) => logLine('update check: ' + (e && e.message))); };
+  setTimeout(check, 30000);
+  setInterval(check, 4 * 3600000);
 }
 
 function createWindow() {
