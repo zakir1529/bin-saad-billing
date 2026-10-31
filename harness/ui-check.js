@@ -19,7 +19,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   const text = async (sel) => (await page.locator(sel).first().innerText()).replace(/\s+/g, ' ');
   const shot = (n) => page.screenshot({ path: `${OUT}/${n}.png` });
   const state = async () => (await fetch(BASE + '/__state')).json();
-  const nav = async (v) => { await page.click(`[data-act=nav][data-view=${v}]`); await page.waitForTimeout(150); };
+  const nav = async (v) => { await page.hover('.nav'); await page.waitForTimeout(250); await page.click(`[data-act=nav][data-view=${v}]`); await page.waitForTimeout(150); };
 
   await page.goto(BASE);
   await page.waitForSelector('#l-name');
@@ -310,12 +310,13 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.waitForTimeout(400);
   check('sizes were added: Kurta Black (M) is in the price list', (await text('.content')).includes('Kurta Black (M)'), (await text('.toast')));
   await nav('billing');
-  await page.click('.chip:has-text("Kurtas")');
-  check('checkout shows one Kurta Black card with a size dropdown, filtered by category', (await text('.tiles')).includes('Kurta Black') && (await page.locator('.sizesel').count()) === 1 && !(await text('.tiles')).includes('Navy Blue'), await text('.tiles'));
-  const opts = await page.locator('.sizesel option').allInnerTexts();
-  check('the dropdown lists S, M, L with their stock', opts.some((o) => o.includes('M (5 in stock)')) && opts.some((o) => o.includes('L (3 in stock)')), opts.join(' | '));
+  await page.click('.chip:has-text("Kurtas")', { timeout: 5000 });
+  check('checkout shows one Kurta Black card with a size dropdown, filtered by category', (await text('.tiles')).includes('Kurta Black') && (await page.locator('.ddbtn').count()) === 1 && !(await text('.tiles')).includes('Navy Blue'), await text('.tiles'));
+  await page.click('.ddbtn');
+  const opts = await page.locator('.ddopt').allInnerTexts();
+  check('the dropdown lists S, M, L with their stock (low ones say Only N left)', opts.some((o) => /M\s*Only 5 left/.test(o)) && opts.some((o) => /S\s*Only 2 left/.test(o)), opts.join(' | '));
   await shot('22b-size-picker');
-  await page.selectOption('.sizesel', { label: 'Size: M (5 in stock)' });
+  await page.click('.ddopt:has-text("Size M")');
   await page.click('.cardtile [data-act=tile]');
   await page.waitForTimeout(200);
   check('picking a size adds Kurta Black (M) to the bill', (await text('.content')).includes('Kurta Black (M)'), (await text('.content')).slice(0, 300));

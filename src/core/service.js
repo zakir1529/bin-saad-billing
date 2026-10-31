@@ -383,6 +383,7 @@ class Service {
     const sizes = SIZES.filter((z) => input.sizes && input.sizes[z] !== undefined && input.sizes[z] !== null && input.sizes[z] !== false);
     if (!sizes.length) throw new UserError('Choose at least one size.');
     const group = String(input.group || '').trim().slice(0, 30);
+    if (group && !['Kurtas', 'Waistcoats'].includes(group)) throw new UserError('Sizes are only for kurtas and waistcoats. Suits and shawls have no size.');
     const checked = sizes.map((z) => {
       const v = this._checkSuit({ name: `${base} (${z})`, price: input.price, cost: input.cost, stock: input.sizes[z] === true ? null : input.sizes[z], group });
       return { z, v };

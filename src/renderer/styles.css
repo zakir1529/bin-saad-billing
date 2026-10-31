@@ -1,25 +1,25 @@
 :root {
-  --bg: #111317;
-  --panel: #1a1d23;
-  --panel-2: #22262e;
-  --raised: #282d36;
-  --line: #2d323b;
-  --line-2: #3a404b;
-  --ink: #eeece6;
-  --muted: #9b9ea6;
-  --nav: #0b0c0f;
-  --nav-ink: #a9acb4;
+  --bg: #0f0f11;
+  --panel: #18181b;
+  --panel-2: #202024;
+  --raised: #27272c;
+  --line: #2e2e34;
+  --line-2: #3d3d44;
+  --ink: #f6f4ee;
+  --muted: #b9bbc2;
+  --nav: #09090b;
+  --nav-ink: #d0d2d8;
   --accent: #c9a35b;
   --accent-dark: #b58f47;
   --accent-ink: #1a1408;
-  --accent-soft: #342b1a;
+  --accent-soft: #2f2716;
   --danger: #e4796d;
   --danger-soft: #3a1f1c;
   --ok: #74c493;
   --ok-soft: #1b3226;
   --warn: #e0b45a;
   --warn-soft: #3a2f17;
-  --field: #12151a;
+  --field: #111113;
   --radius: 10px;
   font-family: "Segoe UI", Arial, sans-serif;
   color-scheme: dark;
@@ -45,7 +45,8 @@ h2 { font-size: 15px; }
 
 #app { height: 100%; }
 .shell { display: flex; height: 100%; }
-.nav { width: 208px; flex: none; background: var(--nav); color: var(--nav-ink); display: flex; flex-direction: column; padding: 20px 12px; gap: 3px; border-right: 1px solid #1b1e24; }
+.navwrap { width: 70px; flex: none; position: relative; z-index: 30; }
+.nav { position: absolute; top: 0; bottom: 0; left: 0; width: 70px; overflow: hidden; transition: width .18s ease, box-shadow .18s ease; flex: none; background: var(--nav); color: var(--nav-ink); display: flex; flex-direction: column; padding: 20px 12px; gap: 3px; border-right: 1px solid #1b1e24; }
 .brand { padding: 4px 10px 20px; color: #f3efe6; text-align: center; }
 .brandlogo { display: block; width: 100%; max-width: 168px; height: auto; margin: 0 auto 6px; mix-blend-mode: lighten; }
 .loginlogo { display: block; width: 240px; max-width: 100%; height: auto; margin: -6px auto 12px; mix-blend-mode: lighten; }
@@ -196,3 +197,34 @@ tr.sel td { background: var(--accent-soft); }
 .tile.cardtile.in { border-color: var(--accent); background: var(--accent-soft); }
 .tile.cardtile .sizesel { width: 100%; padding: 8px 10px; }
 .tile.cardtile .addbtn { width: 100%; justify-content: center; }
+
+/* the menu shows only icons; it opens with names when the mouse is over it */
+.nav:hover { width: 224px; box-shadow: 18px 0 40px rgba(0, 0, 0, .55); }
+.nav button.item { white-space: nowrap; }
+.nav button.item span { opacity: 0; transition: opacity .12s ease; }
+.nav:hover button.item span { opacity: 1; }
+.nav .brandmark { display: block; width: 44px; height: auto; margin: 4px auto 0; mix-blend-mode: lighten; }
+.nav .brandlogo { display: none; }
+.nav:hover .brandmark { display: none; }
+.nav:hover .brandlogo { display: block; }
+.nav .who { opacity: 0; transition: opacity .12s ease; white-space: nowrap; }
+.nav:hover .who { opacity: 1; }
+.nav button.item .ico { margin-left: 2px; }
+
+/* size dropdown on the checkout cards */
+.tile.cardtile { background: linear-gradient(180deg, #1d1d21 0%, #151518 100%); border-color: #34343a; gap: 8px; padding: 14px; }
+.tile.cardtile .nm { font-size: 15px; letter-spacing: .2px; }
+.tile.cardtile .cat { font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--accent); }
+.tile.cardtile .pr { font-size: 17px; }
+.tile.cardtile .addbtn { padding: 10px; font-weight: 700; letter-spacing: .3px; }
+.dd { position: relative; }
+.ddbtn { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; background: #0f0f11; border: 1px solid #3a3a41; border-radius: 8px; padding: 9px 10px; color: var(--ink); }
+.ddbtn:hover { border-color: var(--accent); }
+.ddbtn svg { margin-left: auto; color: var(--accent); flex: none; }
+.ddst { font-style: normal; font-size: 12px; color: var(--muted); }
+.ddst.low { color: var(--warn); font-weight: 600; }
+.ddst.out { color: var(--danger); font-weight: 600; }
+.ddlist { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); background: #141416; border: 1px solid var(--accent-dark); border-radius: 8px; padding: 4px; box-shadow: 0 14px 40px rgba(0, 0, 0, .7); }
+.ddopt { width: 100%; display: flex; justify-content: space-between; gap: 8px; align-items: center; background: none; border: 0; border-radius: 6px; padding: 8px 9px; color: var(--ink); text-align: left; }
+.ddopt:hover { background: var(--accent-soft); }
+.ddopt.on { background: #26200f; color: var(--accent); }

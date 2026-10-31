@@ -58,7 +58,7 @@
     prices: { q: '', all: [] },
     udhaar: { q: '', list: null, sel: null, detail: null, pay: null, busy: false },
     profit: { month: monthKey(), day: '', data: null },
-    dash: null, ledger: null, sizeSel: {},
+    dash: null, ledger: null, sizeSel: {}, dd: null,
     sales: { day: todayKey(), month: monthKey(), day_data: null, month_data: null },
     reveal: { on: false, today: null, timer: null, unlocked: false },
     showPw: {}, stock: { log: [] },
@@ -78,6 +78,7 @@
     try {
       return await fn();
     } catch (e) {
+      console.error('[safe]', e && e.stack ? e.stack : e);
       S.saving = false;
       toast(e && e.message ? e.message : String(e), 'error');
     }
@@ -361,6 +362,7 @@
 
   const TITLES = { dashboard: 'Dashboard', ledger: 'Ledger', billing: 'Checkout', inventory: 'Inventory', bills: 'Bills', udhaar: 'Udhaar', profit: 'Analytics', sales: 'Sales', settings: 'Settings' };
 
+  const SIZED = ['Kurtas', 'Waistcoats'];
   const ICONS = {
     dashboard: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
     billing: '<path d="M3 4h2l2.4 11.2a1.5 1.5 0 0 0 1.5 1.2h8.2a1.5 1.5 0 0 0 1.5-1.1L20.5 8H6"/><circle cx="9.5" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/>',
@@ -380,11 +382,11 @@
     if (owner) items.push(['udhaar', 'Udhaar'], ['profit', 'Analytics'], ['ledger', 'Ledger'], ['sales', 'Sales'], ['settings', 'Settings']);
     const backupWarn = S.info && S.info.backupFolderSet && S.info.lastBackup && S.info.lastBackup.ok === false;
     return `<div class="shell">
-      <nav class="nav">
-        <div class="brand"><img class="brandlogo" src="logo.jpg" alt="${esc(S.settings.shopName)}"></div>
+      <div class="navwrap"><nav class="nav">
+        <div class="brand"><img class="brandmark" src="logo-mark.jpg" alt=""><img class="brandlogo" src="logo.jpg" alt="${esc(S.settings.shopName)}"></div>
         ${items.map(([v, label]) => `<button class="item ${S.view === v ? 'on' : ''}" data-act="nav" data-view="${v}">${icon(v)}<span>${label}</span></button>`).join('')}
         <div class="who"><b>${esc(S.user.name)}</b>${owner ? 'Owner' : 'Staff'}<br><button data-act="logout">Log out</button></div>
-      </nav>
+      </nav></div>
       <div class="main">
         <div class="top">
           <h1>${TITLES[S.view]}</h1><div class="grow"></div>
@@ -452,7 +454,7 @@
     } else {
       const seen = new Set();
       tiles = list.map((s) => {
-        if (s.base && s.size) {
+        if (s.base && s.size && SIZED.includes(s.group)) {
           if (seen.has(s.base)) return '';
           seen.add(s.base);
           const sibs = list.filter((x) => x.base === s.base);
@@ -466,12 +468,15 @@
           const sorted = sibs.slice().sort((x, y) => order.indexOf(x.size) - order.indexOf(y.size));
           let cur = sorted.find((x) => x.id === S.sizeSel[s.base]) || sorted.find((x) => stockOf(x) !== 0) || sorted[0];
           const cst = stockOf(cur);
-          const opts = sorted.map((x) => { const xs = stockOf(x); return `<option value="${x.id}" ${x.id === cur.id ? 'selected' : ''}>Size: ${esc(x.size)}${xs === null ? '' : xs === 0 ? ' (Out of Stock)' : ' (' + xs + ' in stock)'}</option>`; }).join('');
+          const lowAt = S.settings.lowStockAt;
+          const lab = (x) => { const xs = stockOf(x); return xs === null ? '' : xs === 0 ? '<i class="ddst out">Out of Stock</i>' : xs <= lowAt ? `<i class="ddst low">Only ${xs} left</i>` : `<i class="ddst">${xs} in stock</i>`; };
+          const open = S.dd === s.base;
+          const ddl = open ? `<div class="ddlist">${sorted.map((x) => `<button class="ddopt ${x.id === cur.id ? 'on' : ''}" data-act="ddPick" data-base="${esc(s.base)}" data-id="${x.id}"><span>Size ${esc(x.size)}</span>${lab(x)}</button>`).join('')}</div>` : '';
           return `<div class="tile cardtile ${q ? 'in' : ''}">
-            <span class="nm">${esc(s.base)}</span><span class="muted small">${esc(s.group || '')}</span>
-            <select class="sizesel" data-sizesel="${esc(s.base)}" aria-label="Select size">${opts}</select>
+            <span class="nm">${esc(s.base)}</span><span class="cat">${esc(s.group || '')}</span>
+            <div class="dd"><button class="ddbtn" data-act="ddToggle" data-base="${esc(s.base)}" aria-label="Select size"><span>Size ${esc(cur.size)}</span>${lab(cur)}<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>${ddl}</div>
             <span class="pr num">${money(cur.price)}</span>
-            <button class="btn primary addbtn" data-act="tile" data-id="${cur.id}" ${cst === 0 ? 'disabled' : ''}>${cst === 0 ? 'Out of stock' : '+ Add to Order'}</button>${q ? `<span class="qty">x${q}</span>` : ''}</div>`;
+            <button class="btn primary addbtn" data-act="tile" data-id="${cur.id}" ${cst === 0 ? 'disabled' : ''}>${cst === 0 ? 'Out of stock' : '+ Add to Checkout'}</button>${q ? `<span class="qty">x${q}</span>` : ''}</div>`;
         }
         const st = stockOf(s);
         const low = st !== null && st > 0 && st <= S.settings.lowStockAt;
@@ -902,7 +907,7 @@
         <div class="row"><button class="btn grow" data-act="modalCancel">Close</button></div></div></div></div>`;
     }
     if (m.type === 'sizes') {
-      const cats = ['Suits', 'Kurtas', 'Waistcoats', 'Shawls'];
+      const cats = ['Kurtas', 'Waistcoats'];
       return `<div class="overlay"><div class="dialog"><h2>Add an item with sizes</h2><div class="stack">
         <div><label class="field" for="m-base">Item name (for example Kurta Black)</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}"></div>
         <div class="chips">${cats.map((g) => `<button class="chip ${m.group === g ? 'on' : ''}" data-act="sizeCat" data-v="${g}">${g}</button>`).join('')}</div>
@@ -1106,6 +1111,8 @@
     eye: () => toggleReveal(),
 
     tile: (el) => addSuit(Number(el.dataset.id)),
+    ddToggle(el) { S.dd = S.dd === el.dataset.base ? null : el.dataset.base; render(); },
+    ddPick(el) { S.sizeSel[el.dataset.base] = Number(el.dataset.id); S.dd = null; render(); },
     tileGroup(el) { S.modal = { type: 'sizepick', base: el.dataset.base }; render(); },
     pickSize(el) { S.modal = null; addSuit(Number(el.dataset.id)); },
     group: (el) => { S.group = el.dataset.v; render(); },
@@ -1347,6 +1354,8 @@
     const fn = ACT[el.dataset.act];
     if (fn) safe(() => fn(el, e));
   });
+
+  document.addEventListener('click', (e) => { if (S.dd && !e.target.closest('.dd')) { S.dd = null; render(); } });
 
   document.addEventListener('input', (e) => {
     const el = e.target;
