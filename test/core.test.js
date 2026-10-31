@@ -896,3 +896,20 @@ test('deleteSuit: only never-sold items; sold ones must be hidden instead', () =
   ctx.svc.createBill(plainBill(ctx));
   assert.throws(() => ctx.svc.deleteSuit(ctx.plain.id, 'owner1234'), /already sold/);
 });
+
+test('switch account: owner to staff is free, staff to owner needs the password; categories are the four kinds', () => {
+  const ctx = profitCtx();
+  ctx.svc.saveUser({ name: 'Ali', username: 'ali', password: 'ali12345', role: 'staff' });
+  const accts = ctx.svc.listAccounts();
+  const ali = accts.find((a) => a.role === 'staff');
+  const owner = accts.find((a) => a.role === 'owner');
+  assert.equal(ctx.svc.switchAccount(ali.id, '').role, 'staff');
+  assert.throws(() => ctx.svc.ledger(), /owner/);
+  assert.throws(() => ctx.svc.switchAccount(owner.id, 'wrong'), /Wrong password/);
+  assert.equal(ctx.svc.switchAccount(owner.id, 'owner1234').role, 'owner');
+  ctx.svc.saveSuit({ name: 'Grey Shawl', price: 5000, stock: 3, group: 'Shawls' });
+  const led = ctx.svc.ledger();
+  assert.deepEqual(led.stock.byCategory.map((c) => c.name), ['Suits', 'Kurtas', 'Waistcoats', 'Shawls']);
+  assert.equal(led.stock.byCategory.find((c) => c.name === 'Shawls').atPrice, 15000);
+  assert.throws(() => ctx.svc.saveSuitSizes({ base: 'Grey Shawl', group: 'Shawls', price: 100, sizes: { M: 1 } }), /no size/);
+});

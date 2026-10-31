@@ -10,10 +10,19 @@ const PUBLIC_METHODS = [
   'listSuits', 'saveSuit', 'importSuits', 'createBill', 'getBill', 'searchBills', 'cancelBill',
   'dailyReport', 'monthlyReport', 'verifyPassword', 'listUsers', 'saveUser', 'changePassword', 'auditLog',
   'profitReport', 'listUdhaar', 'udhaarCustomer', 'receiveUdhaar',
-  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'setBasePrice', 'deleteSuit', 'dashboard', 'ledger', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
+  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'listAccounts', 'switchAccount', 'setBasePrice', 'deleteSuit', 'dashboard', 'ledger', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
 ];
 
 const SIZES = ['S', 'M', 'L', 'XL'];
+const CATEGORIES = ['Suits', 'Kurtas', 'Waistcoats', 'Shawls'];
+// The four kinds of things the shop sells. Anything that is not a kurta, waistcoat or shawl is a suit.
+function categoryOf(group) {
+  const g = String(group || '').toLowerCase();
+  if (g.includes('kurta')) return 'Kurtas';
+  if (g.includes('waist')) return 'Waistcoats';
+  if (g.includes('shawl')) return 'Shawls';
+  return 'Suits';
+}
 const pad2 = (n) => String(n).padStart(2, '0');
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
@@ -192,6 +201,36 @@ class Service {
   logout() {
     this.userId = null;
     return true;
+  }
+
+  // Who can be switched to. Only names and roles, never anything secret.
+  listAccounts() {
+    const u = this._requireUser();
+    return this.d.users.filter((x) => x.active).map((x) => ({ id: x.id, name: x.name, role: x.role, me: x.id === u.id }));
+  }
+
+  // Switch between the owner and staff without typing the user name again.
+  // Owner to staff needs no password (staff can do less). Anything else needs the password of the person switched to.
+  switchAccount(userId, password) {
+    const cur = this._requireUser();
+    const t = this.d.users.find((x) => x.id === userId && x.active);
+    if (!t) throw new UserError('That person was not found.');
+    if (t.id === cur.id) return this._pub(t);
+    const free = cur.role === 'owner' && t.role !== 'owner';
+    if (!free) {
+      const now = this.now().getTime();
+      if (this._switchLockUntil && now < this._switchLockUntil) throw new UserError('Too many wrong passwords. Please wait a minute.');
+      if (!checkPassword(t, password)) {
+        this._switchFails = (this._switchFails || 0) + 1;
+        if (this._switchFails >= 5) { this._switchLockUntil = now + 60000; this._switchFails = 0; }
+        throw new UserError('Wrong password.');
+      }
+      this._switchFails = 0;
+    }
+    this.userId = t.id;
+    this._audit(cur, 'switch-account', `${cur.name} to ${t.name}`);
+    this.store.run(() => {});
+    return this._pub(t);
   }
 
   // Re-check the logged-in user's password (used for the eye button and other confirmations).
@@ -889,12 +928,12 @@ class Service {
     const paid = this.d.bills.filter((b) => b.status === 'paid');
     const sum = (k) => paid.filter((b) => b.dateKey === k).reduce((n, b) => n + b.total, 0);
     let atCost = 0; let atPrice = 0; let pieces = 0; let uncosted = 0;
-    const cats = new Map();
+    const cats = new Map(CATEGORIES.map((n) => [n, { name: n, pieces: 0, atPrice: 0 }]));
     for (const x of this.d.suits) {
       if (!x.active || x.stock === null || x.stock === undefined) continue;
       pieces += x.stock; atPrice += x.stock * x.price;
       if (x.cost === null || x.cost === undefined) uncosted++; else atCost += x.stock * x.cost;
-      const g = x.group || 'Other';
+      const g = categoryOf(x.group);
       const c = cats.get(g) || { name: g, pieces: 0, atPrice: 0 };
       c.pieces += x.stock; c.atPrice += x.stock * x.price; cats.set(g, c);
     }
@@ -903,7 +942,7 @@ class Service {
     const top = [...sold.entries()].sort((a, b) => b[1] - a[1])[0];
     return {
       today: sum(today), yesterday: sum(yest), lifetime: paid.reduce((n, b) => n + b.total, 0), bills: paid.length,
-      stock: { pieces, atCost, atPrice, uncosted, byCategory: [...cats.values()].sort((a, b) => b.atPrice - a.atPrice) },
+      stock: { pieces, atCost, atPrice, uncosted, byCategory: CATEGORIES.map((n) => cats.get(n)) },
       topToday: top ? { name: top[0], qty: top[1] } : null,
     };
   }
@@ -988,7 +1027,7 @@ class Service {
     const inMonth = (k) => this.d.bills.filter((b) => b.status === 'paid' && (k.length === 10 ? b.dateKey === k : b.dateKey.startsWith(k + '-')));
     const bills = inMonth(key);
     const totals = this._profitTotals(bills);
-    const groupOf = new Map(this.d.suits.map((x) => [x.id, x.group || 'Other']));
+    const groupOf = new Map(this.d.suits.map((x) => [x.id, categoryOf(x.group)]));
     const cats = new Map();
     for (const b of bills) {
       if (b.costTotal === null || b.costTotal === undefined) continue;

@@ -95,6 +95,13 @@
     else render();
   }
 
+  async function doSwitched(user) {
+    clearTimeout(S.reveal.timer);
+    S.reveal = { on: false, today: null, timer: null, unlocked: false };
+    S.modal = null; S.showPw = {}; S.form = null; S.search = ''; S.group = 'All';
+    await afterLogin(user);
+    toast('Now using ' + user.name + '.');
+  }
   async function afterLogin(user) {
     S.user = user;
     S.view = 'dashboard';
@@ -363,6 +370,9 @@
   const TITLES = { dashboard: 'Dashboard', ledger: 'Ledger', billing: 'Checkout', inventory: 'Inventory', bills: 'Bills', udhaar: 'Udhaar', profit: 'Analytics', sales: 'Sales', settings: 'Settings' };
 
   const SIZED = ['Kurtas', 'Waistcoats'];
+  const svgI = (d) => `<svg class="ico" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const POWER_ICO = svgI('<path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/>');
+  const SWITCH_ICO = svgI('<path d="M4 8h14l-3-3"/><path d="M20 16H6l3 3"/>');
   const ICONS = {
     dashboard: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
     billing: '<path d="M3 4h2l2.4 11.2a1.5 1.5 0 0 0 1.5 1.2h8.2a1.5 1.5 0 0 0 1.5-1.1L20.5 8H6"/><circle cx="9.5" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/>',
@@ -385,7 +395,7 @@
       <div class="navwrap"><nav class="nav">
         <div class="brand"><img class="brandmark" src="logo-mark.jpg" alt=""><img class="brandlogo" src="logo.jpg" alt="${esc(S.settings.shopName)}"></div>
         ${items.map(([v, label]) => `<button class="item ${S.view === v ? 'on' : ''}" data-act="nav" data-view="${v}">${icon(v)}<span>${label}</span></button>`).join('')}
-        <div class="who"><b>${esc(S.user.name)}</b>${owner ? 'Owner' : 'Staff'}<br><button data-act="logout">Log out</button></div>
+        <div class="who"><b>${esc(S.user.name)}</b>${owner ? 'Owner' : 'Staff'}<div class="whobtns"><button class="swbtn" data-act="switchOpen">${SWITCH_ICO}<span>Switch</span></button><button class="outbtn" data-act="logout">${POWER_ICO}<span>Log out</span></button></div></div>
       </nav></div>
       <div class="main">
         <div class="top">
@@ -471,10 +481,10 @@
           const lowAt = S.settings.lowStockAt;
           const lab = (x) => { const xs = stockOf(x); return xs === null ? '' : xs === 0 ? '<i class="ddst out">Out of Stock</i>' : xs <= lowAt ? `<i class="ddst low">Only ${xs} left</i>` : `<i class="ddst">${xs} in stock</i>`; };
           const open = S.dd === s.base;
-          const ddl = open ? `<div class="ddlist">${sorted.map((x) => `<button class="ddopt ${x.id === cur.id ? 'on' : ''}" data-act="ddPick" data-base="${esc(s.base)}" data-id="${x.id}"><span>Size ${esc(x.size)}</span>${lab(x)}</button>`).join('')}</div>` : '';
+          const ddl = open ? `<div class="ddlist">${sorted.map((x) => `<button class="ddopt ${x.id === cur.id ? 'on' : ''}" data-act="ddPick" data-base="${esc(s.base)}" data-id="${x.id}"><span class="szb">${esc(x.size)}</span><span class="grow">Size ${esc(x.size)}</span>${lab(x)}</button>`).join('')}</div>` : '';
           return `<div class="tile cardtile ${q ? 'in' : ''}">
             <span class="nm">${esc(s.base)}</span><span class="cat">${esc(s.group || '')}</span>
-            <div class="dd"><button class="ddbtn" data-act="ddToggle" data-base="${esc(s.base)}" aria-label="Select size"><span>Size ${esc(cur.size)}</span>${lab(cur)}<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>${ddl}</div>
+            <div class="dd"><button class="ddbtn" data-act="ddToggle" data-base="${esc(s.base)}" aria-label="Select size"><span class="szb">${esc(cur.size)}</span><span class="grow">Size ${esc(cur.size)}</span>${lab(cur)}<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>${ddl}</div>
             <span class="pr num">${money(cur.price)}</span>
             <button class="btn primary addbtn" data-act="tile" data-id="${cur.id}" ${cst === 0 ? 'disabled' : ''}>${cst === 0 ? 'Out of stock' : '+ Add to Checkout'}</button>${q ? `<span class="qty">x${q}</span>` : ''}</div>`;
         }
@@ -638,7 +648,7 @@
       </div>
       <div class="card row wrap" style="margin-bottom:12px">
         <div class="field-wrap" style="min-width:240px"><label class="field" for="pq">Search the suits</label><input id="pq" type="text" data-bind="prices.q" data-rerender="1" value="${esc(S.prices.q)}" placeholder="Suit name or group"></div>
-        ${owner ? '<div style="align-self:flex-end" class="row wrap"><button class="btn primary" data-act="addSuit">Add a suit</button><button class="btn primary" data-act="addSizes">Add with sizes</button><button class="btn" data-act="pasteList">Paste a list</button><button class="btn" data-act="pasteStock">Paste stock counts</button>' + eyeBtn() + '</div>' : '<div class="muted small" style="align-self:flex-end">Only the owner can change prices and stock.</div>'}
+        ${owner ? '<div style="align-self:flex-end" class="row wrap"><button class="btn primary" data-act="addSuit">Add a suit</button><button class="btn primary" data-act="addSizes">Add Kurta / Waistcoat</button><button class="btn" data-act="pasteList">Paste a list</button><button class="btn" data-act="pasteStock">Paste stock counts</button>' + eyeBtn() + '</div>' : '<div class="muted small" style="align-self:flex-end">Only the owner can change prices and stock.</div>'}
       </div>
       <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Suit</th><th>Group</th><th class="right">Price</th>${owner ? '<th class="right">Cost</th><th class="right">Profit each</th>' : ''}<th class="right">In stock</th><th>Status</th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="${owner ? 8 : 5}" class="empty">No suits yet.</td></tr>`}</tbody></table></div>
@@ -895,6 +905,18 @@
         <div class="err">${esc(m.error)}</div>
         <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn danger grow" data-act="modalOk">Delete</button></div></div></div></div>`;
     }
+    if (m.type === 'switch') {
+      return `<div class="overlay"><div class="dialog"><h2>Switch account</h2><div class="stack">
+        <div class="muted small">Pick who is using the computer now. Going from the owner to staff needs no password. Going to the owner needs the owner's password.</div>
+        <div class="acclist">${m.list.map((a) => `<button class="accopt ${a.me ? 'on' : ''}" data-act="switchPick" data-id="${a.id}" data-role="${a.role}" ${a.me ? 'disabled' : ''}><span class="av">${esc(a.name.slice(0, 1).toUpperCase())}</span><span class="grow"><b>${esc(a.name)}</b><br><small>${a.role === 'owner' ? 'Owner' : 'Staff'}${a.me ? ' (you)' : ''}</small></span></button>`).join('')}</div>
+        <div class="row"><button class="btn grow" data-act="modalCancel">Close</button></div></div></div></div>`;
+    }
+    if (m.type === 'switchPw') {
+      return `<div class="overlay"><div class="dialog"><h2>Password for ${esc(m.name)}</h2><div class="stack">
+        ${pwInput('m-spw', 'modal.value', m.value || '', { enter: 'modalOk', autofocus: true, label: 'Password' })}
+        <div class="err">${esc(m.error)}</div>
+        <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Switch</button></div></div></div></div>`;
+    }
     if (m.type === 'sizepick') {
       const order = ['S', 'M', 'L', 'XL'];
       const sibs = S.suits.filter((x) => x.base === m.base).sort((a, b) => order.indexOf(a.size) - order.indexOf(b.size));
@@ -908,8 +930,8 @@
     }
     if (m.type === 'sizes') {
       const cats = ['Kurtas', 'Waistcoats'];
-      return `<div class="overlay"><div class="dialog"><h2>Add an item with sizes</h2><div class="stack">
-        <div><label class="field" for="m-base">Item name (for example Kurta Black)</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}"></div>
+      return `<div class="overlay"><div class="dialog"><h2>Add a kurta or waistcoat</h2><div class="stack">
+        <div><label class="field" for="m-base">Name (for example Kurta Black). Suits and shawls have no size, add them with Add a suit.</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}"></div>
         <div class="chips">${cats.map((g) => `<button class="chip ${m.group === g ? 'on' : ''}" data-act="sizeCat" data-v="${g}">${g}</button>`).join('')}</div>
         <div class="row"><div class="field-wrap"><label class="field" for="m-sp">Selling price (Rs.)</label><input id="m-sp" type="text" inputmode="numeric" data-bind="modal.price" data-kind="digits" value="${esc(m.price)}"></div>
           <div class="field-wrap"><label class="field" for="m-sc">Cost price (Rs.)</label><input id="m-sc" type="text" inputmode="numeric" data-bind="modal.cost" data-kind="digits" value="${esc(m.cost)}" placeholder="Optional"></div></div>
@@ -1111,6 +1133,13 @@
     eye: () => toggleReveal(),
 
     tile: (el) => addSuit(Number(el.dataset.id)),
+    async switchOpen() { S.modal = { type: 'switch', list: await call('listAccounts') }; render(); },
+    async switchPick(el) {
+      const id = Number(el.dataset.id);
+      const a = S.modal.list.find((x) => x.id === id);
+      if (S.user.role === 'owner' && a.role !== 'owner') { const u = await call('switchAccount', id, ''); await doSwitched(u); return; }
+      S.modal = { type: 'switchPw', id, name: a.name, value: '', error: '' }; S.showPw = {}; render();
+    },
     ddToggle(el) { S.dd = S.dd === el.dataset.base ? null : el.dataset.base; render(); },
     ddPick(el) { S.sizeSel[el.dataset.base] = Number(el.dataset.id); S.dd = null; render(); },
     tileGroup(el) { S.modal = { type: 'sizepick', base: el.dataset.base }; render(); },
@@ -1243,6 +1272,9 @@
           S.modal = null; S.showPw = {};
           await reloadSuits();
           toast(r.removed + (r.removed === 1 ? ' item deleted.' : ' items deleted.'));
+        } else if (m.type === 'switchPw') {
+          const u = await call('switchAccount', m.id, m.value || '');
+          await doSwitched(u);
         } else if (m.type === 'sizes') {
           const sizes = {};
           for (const z of ['S', 'M', 'L', 'XL']) if (m['z' + z] !== '' && m['z' + z] !== undefined) sizes[z] = Number(m['z' + z]);

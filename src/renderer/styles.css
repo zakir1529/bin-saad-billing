@@ -228,3 +228,34 @@ tr.sel td { background: var(--accent-soft); }
 .ddopt { width: 100%; display: flex; justify-content: space-between; gap: 8px; align-items: center; background: none; border: 0; border-radius: 6px; padding: 8px 9px; color: var(--ink); text-align: left; }
 .ddopt:hover { background: var(--accent-soft); }
 .ddopt.on { background: #26200f; color: var(--accent); }
+
+/* each menu icon has its own colour, like a jewel */
+.nav button.item .ico { opacity: 1; }
+.nav button.item[data-view=dashboard] .ico { color: #7fb2ff; }
+.nav button.item[data-view=billing] .ico { color: #6fd39a; }
+.nav button.item[data-view=inventory] .ico { color: #f0b35a; }
+.nav button.item[data-view=bills] .ico { color: #9ab8d6; }
+.nav button.item[data-view=udhaar] .ico { color: #f08a9b; }
+.nav button.item[data-view=profit] .ico { color: #5fd0c2; }
+.nav button.item[data-view=ledger] .ico { color: #b79cf0; }
+.nav button.item[data-view=sales] .ico { color: #e8c76a; }
+.nav button.item[data-view=settings] .ico { color: #a9afbb; }
+.nav button.item.on .ico { filter: drop-shadow(0 0 5px currentColor); }
+
+/* switch account and log out */
+.nav .who { padding: 12px 6px 4px; }
+.nav .who b { display: block; color: #f0ede5; font-size: 13px; }
+.whobtns { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.whobtns button { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border-radius: 8px; padding: 8px 10px; font-size: 13px; white-space: nowrap; }
+.whobtns .swbtn { border: 1px solid #4a3f24; color: var(--accent); }
+.whobtns .swbtn:hover { background: var(--accent-soft); }
+.whobtns .outbtn { border: 1px solid #4a2523; color: #f08a80; }
+.whobtns .outbtn:hover { background: #2a1513; }
+.acclist { display: flex; flex-direction: column; gap: 8px; }
+.accopt { display: flex; align-items: center; gap: 12px; text-align: left; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--ink); }
+.accopt:hover:not(:disabled) { border-color: var(--accent); }
+.accopt.on { border-color: var(--accent-dark); opacity: .75; cursor: default; }
+.accopt small { color: var(--muted); }
+.accopt .av { width: 34px; height: 34px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 700; }
+.szb { min-width: 28px; height: 24px; padding: 0 7px; border-radius: 12px; background: #2a2412; border: 1px solid #5a4a22; color: var(--accent); font-weight: 700; font-size: 12px; display: inline-grid; place-items: center; }
+.ddopt.on .szb { background: var(--accent); color: var(--accent-ink); }

@@ -337,6 +337,20 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.fill('#m-cpw', 'owner1234'); await page.click('[data-act=modalOk]'); await page.waitForTimeout(400);
   check('after Start real sales the clear buttons are gone', !(await text('.content')).includes('Clear all test data') && (await text('.content')).includes('switched off'), (await text('.toast')));
 
+  // switch account
+  await page.click('[data-act=switchOpen]');
+  await page.waitForSelector('.acclist');
+  check('switch lists the owner and the staff', (await text('.acclist')).includes('Ali') || (await text('.acclist')).toLowerCase().includes('ali'), await text('.acclist'));
+  await shot('25-switch');
+  await page.click('.accopt:not(.on)');
+  await page.waitForTimeout(500);
+  check('owner to staff without a password: staff menu has no Settings', !(await page.locator('.nav').innerText()).includes('Settings'), await page.locator('.nav').innerText());
+  await page.click('[data-act=switchOpen]');
+  await page.click('.accopt:not(.on)');
+  await page.fill('#m-spw', 'owner1234'); await page.click('[data-act=modalOk]');
+  await page.waitForTimeout(600);
+  check('staff to owner needs the password and works with it', (await page.locator('.nav').innerText()).includes('Settings'), '');
+
   const p2 = await browser.newPage({ viewport: { width: 380, height: 700 } });
   await p2.goto(BASE + '/__printed?n=0');
   await p2.screenshot({ path: `${OUT}/14-receipt-80mm.png`, fullPage: true });
