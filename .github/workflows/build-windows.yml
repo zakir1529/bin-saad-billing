@@ -19,7 +19,15 @@ jobs:
       - name: Install
         run: npm install
       - name: Run the billing tests
-        run: npm test
+        shell: bash
+        run: |
+          set +e
+          npm test > test-out.txt 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            grep -E "^not ok|^\s+error:|^\s+(expected|actual):|^\s+message:|Error" test-out.txt | head -20 | while IFS= read -r l; do echo "::error::${l:0:300}"; done
+          fi
+          exit $code
       - name: Build the Windows installer
         run: npm run dist
         env:
