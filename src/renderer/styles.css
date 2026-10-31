@@ -261,3 +261,8 @@ tr.sel td { background: var(--accent-soft); }
 .ddopt.on .szb { background: var(--accent); color: var(--accent-ink); }
 
 input[type=checkbox] { accent-color: var(--accent); }
+
+.tile.cardtile.out { opacity: 1; cursor: default; }
+.tile.cardtile.out .nm { opacity: .6; }
+.tile.cardtile .stkline { padding: 9px 10px; border: 1px solid #2c2c32; border-radius: 8px; background: #101012; }
+.tile.cardtile .stkline .stk { font-size: 12.5px; }

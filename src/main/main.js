@@ -8,7 +8,7 @@ const { Store } = require('../core/store');
 const { Service, formatBillNo } = require('../core/service');
 const { UserError } = require('../core/errors');
 const { buildReceiptHtml, sampleBill } = require('../core/receipt');
-const { buildDayReportHtml } = require('../core/report');
+const { buildDayReportHtml, buildRangeReportHtml } = require('../core/report');
 const { sendMail, gzip } = require('./smtp');
 
 let mainWindow = null;
@@ -306,6 +306,33 @@ const EXTRA = {
     fs.writeFileSync(file, pdf);
     shell.showItemInFolder(file);
     return { file };
+  },
+
+  // Sales between two dates as an A4 PDF in Documents\Bin Saad Reports. Owner only.
+  async rangeReportPdf(from, to) {
+    service._requireOwner();
+    const html = service._asOwner(() => {
+      const range = service.rangeReport(from, to);
+      const bills = service.searchBills({ from, to, limit: 5000 });
+      return buildRangeReportHtml(range, bills, service.getSettings());
+    });
+    const tmpDir = path.join(app.getPath('userData'), 'tmp');
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const tmp = path.join(tmpDir, 'range-report.html');
+    fs.writeFileSync(tmp, html, 'utf8');
+    const win = new BrowserWindow({ show: false, width: 900, height: 1200, webPreferences: { sandbox: true, contextIsolation: true } });
+    try {
+      await win.loadFile(tmp);
+      const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { marginType: 'default' } });
+      const dir = path.join(app.getPath('documents'), 'Bin Saad Reports');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `Sales-${from}_to_${to}.pdf`);
+      fs.writeFileSync(file, pdf);
+      shell.showItemInFolder(file);
+      return { file };
+    } finally {
+      win.destroy();
+    }
   },
 
   // ----- email -----

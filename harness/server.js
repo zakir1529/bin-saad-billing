@@ -39,6 +39,12 @@ const EXTRA = {
     lastReport = buildDayReportHtml(report, service.searchBills({ from: report.dateKey, to: report.dateKey, limit: 500 }), settings());
     return { file: 'C:\\Users\\Shop\\Documents\\Bin Saad Reports\\Sales-' + report.dateKey + '.pdf' };
   },
+  rangeReportPdf(from, to) {
+    service._requireOwner();
+    const { buildRangeReportHtml } = require('../src/core/report');
+    lastReport = buildRangeReportHtml(service.rangeReport(from, to), service.searchBills({ from, to, limit: 5000 }), settings());
+    return { file: 'C:\\Users\\Shop\\Documents\\Bin Saad Reports\\Sales-' + from + '_to_' + to + '.pdf' };
+  },
   testPrint() { printed.push({ id: 0, no: 0, html: 'test' }); return { printed: true }; },
   testReceiptHtml() { return buildReceiptHtml(sampleBill(), settings(), { test: true }); },
   listPrinters() { return [{ name: 'POS-80', displayName: 'POS-80 Thermal Printer', isDefault: true }, { name: 'Office', displayName: 'Office Laser', isDefault: false }]; },

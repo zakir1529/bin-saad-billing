@@ -19,21 +19,7 @@ function timeOf(iso) {
   return `${h}:${pad2(d.getMinutes())} ${ap}`;
 }
 
-// report = dailyReport() result, bills = searchBills() for that day (oldest first is fine, it is sorted here)
-function buildDayReportHtml(report, bills, settings, madeAt = new Date()) {
-  const list = bills.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
-  const rows = list.map((b) => {
-    const cancelled = b.status === 'cancelled';
-    const items = b.lines.map((l) => `${esc(l.name)} &times; ${l.qty}`).join('<br>');
-    const how = cancelled ? 'Cancelled' : (b.due > 0 ? `${esc(b.method)} (udhaar ${rs(b.due)})` : esc(b.method));
-    return `<tr class="${cancelled ? 'x' : ''}"><td>${esc(b.invoice || String(b.no).padStart(4, '0'))}</td><td>${timeOf(b.createdAt)}</td><td>${items}</td>
-      <td class="r">${b.discount ? '-' + rs(b.discount) : ''}</td><td class="r"><b>${rs(b.total)}</b></td><td>${how}</td></tr>`;
-  }).join('');
-  const methods = Object.entries(report.byMethod).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${rs(v)}</td></tr>`).join('');
-  const received = Object.values(report.byMethod).reduce((a, b) => a + b, 0);
-  const pays = (report.payments || []).map((p) => `<tr><td>${timeOf(p.at)}</td><td>${esc(p.name)}</td><td>${esc(p.method)}</td><td class="r">${rs(p.amount)}</td></tr>`).join('');
-
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Sales ${esc(report.dateKey)}</title><style>
+const CSS = `
 @page { size: A4; margin: 14mm; }
 * { box-sizing: border-box; }
 body { font-family: "Segoe UI", Arial, sans-serif; font-size: 11px; color: #111; margin: 0; }
@@ -51,7 +37,23 @@ td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
 .stat b { font-size: 15px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .foot { margin-top: 18px; color: #777; font-size: 9.5px; }
-</style></head><body>
+`;
+
+// report = dailyReport() result, bills = searchBills() for that day (oldest first is fine, it is sorted here)
+function buildDayReportHtml(report, bills, settings, madeAt = new Date()) {
+  const list = bills.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  const rows = list.map((b) => {
+    const cancelled = b.status === 'cancelled';
+    const items = b.lines.map((l) => `${esc(l.name)} &times; ${l.qty}`).join('<br>');
+    const how = cancelled ? 'Cancelled' : (b.due > 0 ? `${esc(b.method)} (udhaar ${rs(b.due)})` : esc(b.method));
+    return `<tr class="${cancelled ? 'x' : ''}"><td>${esc(b.invoice || String(b.no).padStart(4, '0'))}</td><td>${timeOf(b.createdAt)}</td><td>${items}</td>
+      <td class="r">${b.discount ? '-' + rs(b.discount) : ''}</td><td class="r"><b>${rs(b.total)}</b></td><td>${how}</td></tr>`;
+  }).join('');
+  const methods = Object.entries(report.byMethod).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${rs(v)}</td></tr>`).join('');
+  const received = Object.values(report.byMethod).reduce((a, b) => a + b, 0);
+  const pays = (report.payments || []).map((p) => `<tr><td>${timeOf(p.at)}</td><td>${esc(p.name)}</td><td>${esc(p.method)}</td><td class="r">${rs(p.amount)}</td></tr>`).join('');
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Sales ${esc(report.dateKey)}</title><style>${CSS}</style></head><body>
 <h1>${esc(String(settings.shopName).toUpperCase())}</h1>
 <div class="sub">Sales report for ${dayLabel(report.dateKey)}${settings.address ? ' &middot; ' + esc(settings.address) : ''}</div>
 <div class="stats">
@@ -74,4 +76,44 @@ td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
 </body></html>`;
 }
 
-module.exports = { buildDayReportHtml };
+// range = rangeReport() result, bills = searchBills({ from, to }) for the same dates
+function buildRangeReportHtml(range, bills, settings, madeAt = new Date()) {
+  const t = range.totals;
+  const list = bills.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  const dayRows = range.days.map((d) => `<tr><td>${dayLabel(d.dateKey)}</td><td class="r">${d.bills}</td><td class="r">${rs(d.discounts)}</td><td class="r">${rs(d.udhaarGiven)}</td><td class="r">${rs(d.udhaarCollected)}</td><td class="r"><b>${rs(d.sales)}</b></td></tr>`).join('');
+  const rows = list.map((b) => {
+    const cancelled = b.status === 'cancelled';
+    const items = b.lines.map((l) => `${esc(l.name)} &times; ${l.qty}`).join('<br>');
+    const how = cancelled ? 'Cancelled' : (b.due > 0 ? `${esc(b.method)} (udhaar ${rs(b.due)})` : esc(b.method));
+    return `<tr class="${cancelled ? 'x' : ''}"><td>${esc(b.invoice || String(b.no).padStart(4, '0'))}</td><td>${dayLabel(b.dateKey)} ${timeOf(b.createdAt)}</td><td>${items}</td><td class="r"><b>${rs(b.total)}</b></td><td>${how}</td></tr>`;
+  }).join('');
+  const methods = Object.entries(t.byMethod).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${rs(v)}</td></tr>`).join('');
+  const received = Object.values(t.byMethod).reduce((a, b) => a + b, 0);
+  const made = `${madeAt.getFullYear()}-${pad2(madeAt.getMonth() + 1)}-${pad2(madeAt.getDate())}`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Sales ${esc(range.from)} to ${esc(range.to)}</title><style>${CSS}</style></head><body>
+<h1>${esc(String(settings.shopName).toUpperCase())}</h1>
+<div class="sub">Sales report from ${dayLabel(range.from)} to ${dayLabel(range.to)}${settings.address ? ' &middot; ' + esc(settings.address) : ''}</div>
+<div class="stats">
+  <div class="stat"><i>Sales</i><b>${rs(t.sales)}</b></div>
+  <div class="stat"><i>Bills</i><b>${t.bills}</b></div>
+  <div class="stat"><i>Discounts given</i><b>${rs(t.discounts)}</b></div>
+  <div class="stat"><i>Cancelled bills</i><b>${t.cancelled}</b></div>
+  <div class="stat"><i>Udhaar given</i><b>${rs(t.udhaarGiven)}</b></div>
+  <div class="stat"><i>Udhaar collected</i><b>${rs(t.udhaarCollected)}</b></div>
+  <div class="stat"><i>Money received</i><b>${rs(received)}</b></div>
+</div>
+<div class="two">
+  <div><h2>Money received by method</h2><table><tbody>${methods || '<tr><td>Nothing received.</td><td></td></tr>'}</tbody></table></div>
+  <div></div>
+</div>
+<h2>Day by day</h2>
+<table><thead><tr><th>Day</th><th class="r">Bills</th><th class="r">Discounts</th><th class="r">Udhaar given</th><th class="r">Udhaar collected</th><th class="r">Sales</th></tr></thead>
+<tbody>${dayRows || '<tr><td colspan="6">No sales on these days.</td></tr>'}</tbody></table>
+<h2>Bills</h2>
+<table><thead><tr><th>Invoice</th><th>When</th><th>Items</th><th class="r">Total</th><th>Paid by</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="5">No bills on these days.</td></tr>'}</tbody></table>
+<div class="foot">Made on ${dayLabel(made)} at ${timeOf(madeAt.toISOString())}. Cancelled bills are crossed out and are not in the sales figures.</div>
+</body></html>`;
+}
+
+module.exports = { buildDayReportHtml, buildRangeReportHtml };

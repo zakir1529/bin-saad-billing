@@ -55,9 +55,9 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await nav('billing');
   await shot('04-billing-empty');
   check('billing: save is disabled on an empty bill', await page.locator('[data-act=save][data-print="1"]').isDisabled());
-  await page.click('.tile:has-text("Navy Blue Suit")');
-  await page.click('.tile:has-text("Black Suit")');
-  await page.click('.tile:has-text("Black Suit")');
+  await page.click('.tile:has-text("Navy Blue Suit") .addbtn');
+  await page.click('.tile:has-text("Black Suit") .addbtn');
+  await page.click('.tile:has-text("Black Suit") .addbtn');
   check('billing: tapping twice makes quantity 2', (await text('.billpanel .lines')).includes('Black Suit') && (await page.inputValue('input[data-qty]:near(:text("Black Suit"))')) !== undefined);
   check('billing: subtotal is 12,000', (await text('.billpanel .foot')).includes('Rs. 12,000'));
   await page.click('[data-act=dchip][data-v="10"]');
@@ -108,7 +108,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
 
   // printer failure: the bill is still saved, and printing can be retried
   await fetch(BASE + '/__failprint?on=1');
-  await page.click('.tile:has-text("Rose Printed Suit")');
+  await page.click('.tile:has-text("Rose Printed Suit") .addbtn');
   await page.click('[data-act=exact]');
   await page.click('[data-act=save][data-print="1"]');
   await page.waitForFunction(() => document.querySelector('.dialog') && (document.querySelector('.dialog') || { innerText: '' }).innerText.includes('did not print'));
@@ -211,7 +211,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
 
   // udhaar bill with part payment, printed: nothing about udhaar or the customer on the paper
   await nav('billing');
-  await page.click('.tile:has-text("Maroon Suit")');
+  await page.click('.tile:has-text("Maroon Suit") .addbtn');
   await page.click('[data-act=credit][data-v="1"]');
   check('udhaar: save is blocked until name and phone are given', (await text('.hint')).includes('customer name') && (await page.locator('[data-act=save][data-print="1"]').isDisabled()), await text('.hint'));
   await page.fill('#cname', 'Imran Khan'); await page.fill('#cphone', '0300-1234567');
@@ -225,7 +225,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   const ud = await text('.dialog');
   check('udhaar saved box shows Udhaar Rs. 3,000, not change', ud.includes('Udhaar: Rs. 3,000') && !ud.includes('Change:'), ud);
   await page.click('#newbill');
-  await page.click('.tile:has-text("Maroon Suit")');
+  await page.click('.tile:has-text("Maroon Suit") .addbtn');
   await page.click('[data-act=credit][data-v="1"]');
   await page.fill('#cname', 'Imran Khan'); await page.fill('#cphone', '+92 300 1234567');
   await page.click('[data-act=save][data-print="1"]');
@@ -279,7 +279,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   const navTxt = await text('.nav');
   check('staff does not see Sales, Settings, Udhaar or Profit', !navTxt.includes('Sales') && !navTxt.includes('Settings') && !navTxt.includes('Udhaar') && !navTxt.includes('Profit') && navTxt.includes('Checkout') && navTxt.includes('Inventory'));
   check("staff top bar has no sales chip", (await page.locator('.chip-eye').count()) === 0);
-  await page.click('.tile:has-text("Navy Blue Suit")');
+  await page.click('.tile:has-text("Navy Blue Suit") .addbtn');
   await page.fill('#discval', '20');
   check('staff cannot give 20% (limit 15%)', (await text('.hint')).includes('needs the owner') && (await page.locator('[data-act=save][data-print="1"]').isDisabled()));
   await page.fill('#discval', '15');

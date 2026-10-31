@@ -59,7 +59,7 @@
     udhaar: { q: '', list: null, sel: null, detail: null, pay: null, busy: false },
     profit: { month: monthKey(), day: '', data: null },
     dash: null, ledger: null, sizeSel: {}, dd: null, mail: null,
-    sales: { day: todayKey(), month: monthKey(), day_data: null, month_data: null },
+    sales: { day: todayKey(), month: monthKey(), day_data: null, month_data: null, from: todayKey(), to: todayKey() },
     reveal: { on: false, today: null, timer: null, unlocked: false },
     showPw: {}, stock: { log: [] },
     form: null, newUser: { name: '', username: '', password: '' }, pw: { old: '', a: '', b: '' },
@@ -414,7 +414,7 @@
     const owner = S.user.role === 'owner';
     const items = [['dashboard', 'Dashboard'], ['billing', 'Checkout'], ['inventory', 'Inventory'], ['bills', 'Bills']];
     if (owner) items.push(['udhaar', 'Udhaar'], ['profit', 'Analytics'], ['ledger', 'Ledger'], ['sales', 'Sales'], ['settings', 'Settings']);
-    const backupWarn = S.info && S.info.backupFolderSet && S.info.lastBackup && S.info.lastBackup.ok === false;
+    const backupWarn = false;
     return `<div class="shell">
       <div class="navwrap"><nav class="nav">
         <div class="brand"><img class="brandmark" src="logo-mark.jpg" alt=""><img class="brandlogo" src="logo.jpg" alt="${esc(S.settings.shopName)}"></div>
@@ -510,13 +510,16 @@
             <span class="nm">${esc(s.base)}</span><span class="cat">${esc(s.group || '')}</span>
             <div class="dd"><button class="ddbtn" data-act="ddToggle" data-base="${esc(s.base)}" aria-label="Select size"><span class="szb">${esc(cur.size)}</span><span class="grow">Size ${esc(cur.size)}</span>${lab(cur)}<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>${ddl}</div>
             <span class="pr num">${money(cur.price)}</span>
-            <button class="btn primary addbtn" data-act="tile" data-id="${cur.id}" ${cst === 0 ? 'disabled' : ''}>${cst === 0 ? 'Out of stock' : '+ Add to Checkout'}</button>${q ? `<span class="qty">x${q}</span>` : ''}</div>`;
+            <button class="btn primary addbtn" data-act="tile" data-id="${cur.id}" ${cst === 0 ? 'disabled' : ''}>${cst === 0 ? 'Out of stock' : '+ Add to Order'}</button>${q ? `<span class="qty">x${q}</span>` : ''}</div>`;
         }
         const st = stockOf(s);
         const low = st !== null && st > 0 && st <= S.settings.lowStockAt;
         const stk = st === null ? '' : st === 0 ? '<span class="stk out">Out of stock</span>' : `<span class="stk ${low ? 'low' : ''}">${low ? 'Only ' + st + ' left' : st + ' in stock'}</span>`;
-        return `<button class="tile ${inBill.has(s.id) ? 'in' : ''} ${st === 0 ? 'out' : ''}" data-act="tile" data-id="${s.id}" ${st === 0 ? 'disabled' : ''}>
-          <span class="nm">${esc(s.name)}</span><span><span class="pr num">${money(s.price)}</span><br>${stk}</span>${inBill.has(s.id) ? `<span class="qty">x${inBill.get(s.id)}</span>` : ''}</button>`;
+        return `<div class="tile cardtile ${inBill.has(s.id) ? 'in' : ''} ${st === 0 ? 'out' : ''}">
+          <span class="nm">${esc(s.name)}</span><span class="cat">${esc(s.category || '')}</span>
+          <div class="stkline">${stk || '<span class="stk">Not counted</span>'}</div>
+          <span class="pr num">${money(s.price)}</span>
+          <button class="btn primary addbtn" data-act="tile" data-id="${s.id}" ${st === 0 ? 'disabled' : ''}>${st === 0 ? 'Out of stock' : '+ Add to Order'}</button>${inBill.has(s.id) ? `<span class="qty">x${inBill.get(s.id)}</span>` : ''}</div>`;
       }).join('');
     }
     return `<div class="billing">
@@ -786,6 +789,10 @@
       <div class="row wrap" style="margin-bottom:10px"><h2>One day</h2>
         <input type="date" id="sday" data-bind="sales.day" data-sales="1" value="${esc(S.sales.day)}" style="width:170px" aria-label="Pick a day">
         <button class="btn" data-act="dayPdf">Download this day (PDF)</button></div>
+      <div class="card row wrap" style="margin-bottom:12px"><b>Several days (PDF)</b>
+        <span class="muted">From</span><input type="date" id="rfrom" data-bind="sales.from" value="${esc(S.sales.from)}" style="width:160px" aria-label="From date">
+        <span class="muted">to</span><input type="date" id="rto" data-bind="sales.to" value="${esc(S.sales.to)}" style="width:160px" aria-label="To date">
+        <button class="btn primary" data-act="rangePdf">Download PDF</button></div>
       <div class="stats">
         <div class="stat"><div class="k">Sales</div><div class="v num">${on && d ? money(d.sales) : DOTS}</div></div>
         <div class="stat"><div class="k">Bills</div><div class="v num">${on && d ? d.bills : DOTS}</div></div>
@@ -870,9 +877,7 @@
         <div><button class="btn primary" data-act="saveRules">Save</button></div></div></div>
 
       <div class="card"><h2>Backup</h2><div class="stack" style="margin-top:10px">
-        <div class="muted">A copy of all data is saved every day on this computer. Choose a USB drive too, so the data survives if this computer breaks.</div>
-        <div class="row wrap"><b>USB drive or folder:</b> <span>${esc(S.settings.backupDir || 'Not chosen yet')}</span>
-          <button class="btn small" data-act="pickBackup">Choose</button>${S.settings.backupDir ? '<button class="btn small" data-act="clearBackup">Remove</button>' : ''}</div>
+        <div class="muted">A copy of all data is saved on this computer every day and every time the program is closed. Turn on the nightly email copy in the Email card below for a copy that is safe even if this computer breaks.</div>
         <div class="row wrap"><button class="btn" data-act="backupNow">Back up now</button>
           <span class="${lb && lb.ok === false ? 'hint' : 'muted'}">${lb && lb.at ? (lb.ok ? 'Last backup: ' + when(lb.at) : esc(lb.error)) : 'No backup made yet in this session.'}</span></div></div></div>
 
@@ -1188,6 +1193,11 @@
       render();
     },
     pasteStock() { S.modal = { type: 'stockpaste', text: '', result: null, error: '' }; render(); },
+    async rangePdf() {
+      if (S.settings.revealNeedsPassword && !S.reveal.unlocked) { S.modal = { type: 'password', error: '', after: 'rangePdf' }; render(); return; }
+      const r = await call('rangeReportPdf', S.sales.from || todayKey(), S.sales.to || todayKey());
+      toast('Saved: ' + r.file);
+    },
     async dayPdf() {
       if (S.settings.revealNeedsPassword && !S.reveal.unlocked) { S.modal = { type: 'password', error: '', after: 'dayPdf' }; render(); return; }
       const r = await call('dailyReportPdf', S.sales.day || todayKey());
@@ -1321,6 +1331,7 @@
           S.modal = null;
           await doReveal();
           if (m.after === 'dayPdf') await ACT.dayPdf();
+          if (m.after === 'rangePdf') await ACT.rangePdf();
         } else if (m.type === 'stockin') {
           if (!m.qty) { m.error = 'Enter how many came in.'; render(); return; }
           await call('addStock', { suitId: m.id, qty: Number(m.qty), note: m.note });

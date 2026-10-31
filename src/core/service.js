@@ -10,7 +10,7 @@ const PUBLIC_METHODS = [
   'listSuits', 'saveSuit', 'importSuits', 'createBill', 'getBill', 'searchBills', 'cancelBill',
   'dailyReport', 'monthlyReport', 'verifyPassword', 'listUsers', 'saveUser', 'changePassword', 'auditLog',
   'profitReport', 'listUdhaar', 'udhaarCustomer', 'receiveUdhaar',
-  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'listAccounts', 'switchAccount', 'saveEmailSettings', 'emailStatus', 'resetWithEmailCode', 'setBasePrice', 'deleteSuit', 'dashboard', 'ledger', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
+  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'listAccounts', 'switchAccount', 'saveEmailSettings', 'emailStatus', 'resetWithEmailCode', 'setBasePrice', 'deleteSuit', 'dashboard', 'ledger', 'rangeReport', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
 ];
 
 const SIZES = ['S', 'M', 'L', 'XL'];
@@ -809,6 +809,30 @@ class Service {
       if (paidOf(b) > 0) byMethod[b.method] = (byMethod[b.method] || 0) + paidOf(b);
     }
     return { sales, bills: bills.length, discounts, byMethod, udhaarGiven };
+  }
+
+  // Sales between two dates, both included (for example 28 to 30 October). Owner only.
+  rangeReport(from, to) {
+    this._requireOwner();
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    if (!re.test(String(from)) || !re.test(String(to))) throw new UserError('Pick both dates.');
+    if (from > to) throw new UserError('The first date must not be after the last date.');
+    const days = [];
+    const totals = { sales: 0, bills: 0, discounts: 0, cancelled: 0, udhaarGiven: 0, udhaarCollected: 0, byMethod: {} };
+    const dt = new Date(from + 'T12:00:00');
+    for (let i = 0; i < 400; i++) {
+      const key = dateKeyOf(dt);
+      if (key > to) break;
+      const r = this.dailyReport(key);
+      if (r.bills || r.cancelled || r.udhaarCollected) {
+        days.push({ dateKey: key, sales: r.sales, bills: r.bills, discounts: r.discounts, cancelled: r.cancelled, udhaarGiven: r.udhaarGiven || 0, udhaarCollected: r.udhaarCollected });
+        for (const k of ['sales', 'bills', 'discounts', 'cancelled', 'udhaarGiven', 'udhaarCollected']) totals[k] += (k === 'udhaarGiven' ? (r.udhaarGiven || 0) : r[k]);
+        for (const [m, v] of Object.entries(r.byMethod)) totals.byMethod[m] = (totals.byMethod[m] || 0) + v;
+      }
+      dt.setDate(dt.getDate() + 1);
+    }
+    if (dt <= new Date(to + 'T12:00:00')) throw new UserError('Please pick a range of at most 13 months.');
+    return { from, to, days, totals };
   }
 
   dailyReport(dateKey) {

@@ -978,3 +978,19 @@ test('smtp: sends a mail with an attachment to a fake server over a plain test c
   assert.ok(got.msg.includes('filename="a.txt"') && got.msg.includes(Buffer.from('file body').toString('base64')));
   assert.ok(got.msg.includes(Buffer.from('Hello Rs 5,000').toString('base64')));
 });
+
+
+test('range report adds up several days and rejects bad ranges', () => {
+  const ctx = setup();
+  ctx.svc.createBill(bill(ctx));
+  ctx.clock.t = new Date(2026, 9, 27, 13, 0, 0);
+  ctx.svc.createBill(bill(ctx));
+  const r = ctx.svc.rangeReport('2026-10-26', '2026-10-28');
+  assert.equal(r.totals.bills, 2);
+  assert.equal(r.days.length, 2);
+  assert.equal(r.totals.sales, r.days[0].sales + r.days[1].sales);
+  assert.throws(() => ctx.svc.rangeReport('2026-10-28', '2026-10-26'), /must not be after/);
+  assert.throws(() => ctx.svc.rangeReport('2026-10-01', '2028-10-01'), /13 months/);
+  const html = require('../src/core/report').buildRangeReportHtml(r, ctx.svc.searchBills({ from: '2026-10-26', to: '2026-10-28', limit: 50 }), ctx.svc.getSettings());
+  assert.ok(html.includes('26-10-2026') && html.includes('Day by day'));
+});
