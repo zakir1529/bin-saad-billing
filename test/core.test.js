@@ -913,3 +913,63 @@ test('switch account: owner to staff is free, staff to owner needs the password;
   assert.equal(led.stock.byCategory.find((c) => c.name === 'Shawls').atPrice, 15000);
   assert.throws(() => ctx.svc.saveSuitSizes({ base: 'Grey Shawl', group: 'Shawls', price: 100, sizes: { M: 1 } }), /no size/);
 });
+
+test('email: the 6-digit code works once, expires, locks after wrong tries; codes are never stored in clear', () => {
+  const ctx = profitCtx();
+  assert.throws(() => ctx.svc._beginEmailReset(), /not set up/);
+  ctx.svc.saveEmailSettings({ to: 'owner@example.com', from: 'shop@example.com' }, 'owner1234');
+  ctx.svc._setEmailSecret('locked-blob');
+  assert.throws(() => ctx.svc.saveEmailSettings({ to: 'x@y.com' }, 'wrong'), /password/);
+  assert.throws(() => ctx.svc.saveEmailSettings({ to: 'not-an-email' }, 'owner1234'), /does not look right/);
+  const { code, to } = ctx.svc._beginEmailReset();
+  assert.match(code, /^\d{6}$/); assert.equal(to, 'owner@example.com');
+  assert.ok(!JSON.stringify(ctx.store.data).includes(code));
+  assert.throws(() => ctx.svc.resetWithEmailCode('000000'.replace(/0/g, code[0] === '0' ? '1' : '0'), 'newpass1'), /not right/);
+  ctx.svc.resetWithEmailCode(code, 'newpass1');
+  assert.throws(() => ctx.svc.resetWithEmailCode(code, 'again1234'), /No code|not right/);
+  ctx.svc.logout();
+  assert.equal(ctx.svc.login('owner', 'newpass1').role, 'owner');
+  // 5 wrong tries lock it
+  const c2 = ctx.svc._beginEmailReset().code;
+  const wrong = c2 === '123456' ? '654321' : '123456';
+  for (let i = 0; i < 5; i++) assert.throws(() => ctx.svc.resetWithEmailCode(wrong, 'zzzz1234'), /not right/);
+  assert.throws(() => ctx.svc.resetWithEmailCode(c2, 'zzzz1234'), /Too many/);
+  // at most 3 codes an hour
+  const ctx2 = profitCtx();
+  ctx2.svc.saveEmailSettings({ to: 'o@example.com', from: 's@example.com' }, 'owner1234');
+  ctx2.svc._setEmailSecret('x');
+  ctx2.svc._beginEmailReset(); ctx2.svc._beginEmailReset(); ctx2.svc._beginEmailReset();
+  assert.throws(() => ctx2.svc._beginEmailReset(), /wait an hour/);
+});
+
+test('smtp: sends a mail with an attachment to a fake server over a plain test connection', async () => {
+  const net = require('net');
+  const { sendMail } = require('../src/main/smtp');
+  const got = { lines: [] };
+  const server = net.createServer((c) => {
+    c.write('220 fake ready\r\n');
+    let data = false; let msg = '';
+    c.on('data', (b) => {
+      for (const line of b.toString().split('\r\n')) {
+        if (data) { if (line === '.') { data = false; got.msg = msg; c.write('250 queued\r\n'); } else msg += line + '\n'; continue; }
+        if (!line) continue;
+        got.lines.push(line);
+        if (line.startsWith('EHLO')) c.write('250 ok\r\n');
+        else if (line === 'AUTH LOGIN') c.write('334 VXNlcm5hbWU6\r\n');
+        else if (got.lines.filter((l) => !/^[A-Z]/.test(l) || /^[A-Za-z0-9+/=]{8,}$/.test(l)).length && /AUTH LOGIN/.test(got.lines.join('|')) && !got.authed) { got.step = (got.step || 0) + 1; if (got.step === 1) c.write('334 UGFzc3dvcmQ6\r\n'); else { got.authed = true; c.write('235 ok\r\n'); } }
+        else if (line.startsWith('MAIL FROM')) c.write('250 ok\r\n');
+        else if (line.startsWith('RCPT TO')) c.write('250 ok\r\n');
+        else if (line === 'DATA') { data = true; c.write('354 go\r\n'); }
+        else if (line === 'QUIT') c.end('221 bye\r\n');
+      }
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  const r = await sendMail({ host: '127.0.0.1', port, secure: false, user: 'shop@example.com', pass: 'abcd efgh ijkl mnop', to: 'owner@example.com', subject: 'Daily report', text: 'Hello Rs 5,000', attachments: [{ filename: 'a.txt', content: Buffer.from('file body') }] });
+  server.close();
+  assert.equal(r.sent, true);
+  assert.ok(got.lines.some((l) => l.startsWith('RCPT TO:<owner@example.com>')));
+  assert.ok(got.msg.includes('filename="a.txt"') && got.msg.includes(Buffer.from('file body').toString('base64')));
+  assert.ok(got.msg.includes(Buffer.from('Hello Rs 5,000').toString('base64')));
+});

@@ -10,7 +10,7 @@ const PUBLIC_METHODS = [
   'listSuits', 'saveSuit', 'importSuits', 'createBill', 'getBill', 'searchBills', 'cancelBill',
   'dailyReport', 'monthlyReport', 'verifyPassword', 'listUsers', 'saveUser', 'changePassword', 'auditLog',
   'profitReport', 'listUdhaar', 'udhaarCustomer', 'receiveUdhaar',
-  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'listAccounts', 'switchAccount', 'setBasePrice', 'deleteSuit', 'dashboard', 'ledger', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
+  'addStock', 'importStock', 'listStockLog', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'listAccounts', 'switchAccount', 'saveEmailSettings', 'emailStatus', 'resetWithEmailCode', 'setBasePrice', 'deleteSuit', 'dashboard', 'ledger', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
 ];
 
 const SIZES = ['S', 'M', 'L', 'XL'];
@@ -23,6 +23,8 @@ function categoryOf(group) {
   if (g.includes('shawl')) return 'Shawls';
   return 'Suits';
 }
+const maskEmail = (e) => { const [a, b] = String(e || '').split('@'); return b ? `${a.slice(0, 2)}${'*'.repeat(Math.max(2, a.length - 2))}@${b}` : ''; };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const pad2 = (n) => String(n).padStart(2, '0');
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
@@ -169,6 +171,8 @@ class Service {
       user: this._pub(this._user()),
       shopName: this.d.settings.shopName,
       hasRecovery: !!this.d.recovery,
+      emailReady: this._emailReady(),
+      emailTo: this._emailReady() ? maskEmail(this.d.settings.email.to) : '',
     };
   }
 
@@ -253,7 +257,104 @@ class Service {
   // ---------- settings ----------
   getSettings() {
     this._requireUser();
-    return clone(this.d.settings);
+    return { ...clone(this.d.settings), emailSecretSet: !!this.d.emailSecret };
+  }
+
+  // ---------- email (code for a forgotten password, daily report, backup copy) ----------
+  _emailReady() {
+    const e = this.d.settings.email;
+    return !!(e && e.to && e.from && this.d.emailSecret);
+  }
+
+  emailStatus() {
+    this._requireOwner();
+    const e = this.d.settings.email;
+    return { ready: this._emailReady(), secretSet: !!this.d.emailSecret, to: e.to, from: e.from, lastDaily: this.d.emailState.lastDaily, lastBackup: this.d.emailState.lastBackup };
+  }
+
+  // Owner only, and the owner password is asked every time: where the codes go must not change by accident.
+  saveEmailSettings(patch = {}, password) {
+    const u = this._requireOwner();
+    if (!checkPassword(u, password)) throw new UserError('The password is wrong.');
+    const cur = this.d.settings.email;
+    const next = { ...cur };
+    for (const k of ['to', 'from']) {
+      if (patch[k] !== undefined) {
+        const v = String(patch[k]).trim().toLowerCase();
+        if (v && !EMAIL_RE.test(v)) throw new UserError(`${k === 'to' ? 'The owner' : 'The sender'} email address does not look right.`);
+        next[k] = v;
+      }
+    }
+    for (const k of ['resetCode', 'dailyPdf', 'backupCopy', 'lowStock']) if (patch[k] !== undefined) next[k] = !!patch[k];
+    if (patch.sendAt !== undefined) {
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(patch.sendAt))) throw new UserError('Send time must look like 22:30.');
+      next.sendAt = String(patch.sendAt);
+    }
+    return this.store.run((d) => {
+      d.settings.email = next;
+      this._audit(u, 'email-settings', `to ${maskEmail(next.to) || '-'}, from ${maskEmail(next.from) || '-'}`);
+      return clone(d.settings.email);
+    });
+  }
+
+  // Used by the main program only (never reachable from the screens): keeps the locked app password.
+  _setEmailSecret(blob) {
+    this.store.run((d) => { d.emailSecret = String(blob || ''); this._audit(this._user(), 'email-password', blob ? 'Sender app password saved' : 'Sender app password removed'); });
+  }
+  _getEmailSecret() { return this.d.emailSecret; }
+  // For jobs the program runs by itself at night (nobody is logged in): act as the owner for one step, then go back.
+  _asOwner(fn) {
+    const owner = this.d.users.find((x) => x.role === 'owner' && x.active);
+    if (!owner) throw new UserError('There is no owner account.');
+    const prev = this.userId;
+    this.userId = owner.id;
+    try { return fn(); } finally { this.userId = prev; }
+  }
+  _markEmailSent(kind, dateKey) { this.store.run((d) => { d.emailState[kind === 'daily' ? 'lastDaily' : 'lastBackup'] = dateKey; }); }
+
+  // Main program only: makes a 6-digit code for the owner. The code is never returned to a screen.
+  _beginEmailReset() {
+    const e = this.d.settings.email;
+    if (!e.resetCode || !this._emailReady()) throw new UserError('Email reset is not set up on this computer.');
+    const now = this.now();
+    const prev = this.d.emailReset || { sent: [] };
+    const recent = (prev.sent || []).filter((t) => now.getTime() - new Date(t).getTime() < 3600000);
+    if (recent.length >= 3) throw new UserError('A code was already sent a few times. Please wait an hour, or use the paper recovery code.');
+    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const salt = crypto.randomBytes(16).toString('hex');
+    this.store.run((d) => {
+      d.emailReset = { salt, hash: hashPassword(code, salt), expiresAt: new Date(now.getTime() + 10 * 60000).toISOString(), fails: 0, lockedUntil: null, sent: [...recent, now.toISOString()] };
+      this._audit(null, 'email-code-sent', 'A reset code was sent by email');
+    });
+    return { code, to: e.to };
+  }
+
+  // Works before logging in. Right code (once, within 10 minutes) + new password = the owner gets in again.
+  resetWithEmailCode(code, newPassword) {
+    const rec = this.d.emailReset;
+    const now = this.now();
+    if (rec && rec.lockedUntil && new Date(rec.lockedUntil) > now) throw new UserError('Too many wrong tries. Please wait 15 minutes, or use the paper recovery code.');
+    if (!rec || !rec.hash) throw new UserError('No code was sent. Ask for a new code.');
+    if (new Date(rec.expiresAt) < now) throw new UserError('That code has expired. Ask for a new one.');
+    if (typeof newPassword !== 'string' || newPassword.length < 4) throw new UserError('Password must be at least 4 characters.');
+    const owner = this.d.users.find((x) => x.role === 'owner' && x.active);
+    if (!owner) throw new UserError('There is no owner account to reset.');
+    const given = Buffer.from(hashPassword(String(code || '').replace(/\D/g, ''), rec.salt), 'hex');
+    const real = Buffer.from(rec.hash, 'hex');
+    const good = given.length === real.length && crypto.timingSafeEqual(given, real);
+    const ok = this.store.run((d) => {
+      if (!good) {
+        d.emailReset.fails = (d.emailReset.fails || 0) + 1;
+        if (d.emailReset.fails >= 5) { d.emailReset.lockedUntil = new Date(now.getTime() + 15 * 60000).toISOString(); d.emailReset.hash = ''; }
+        return false;
+      }
+      Object.assign(d.users.find((x) => x.id === owner.id), newCredentials(newPassword));
+      d.emailReset = { sent: d.emailReset.sent || [], hash: '' }; // a code works only once
+      this._audit(owner, 'password-reset', 'Password reset with the emailed code');
+      return true;
+    });
+    if (!ok) throw new UserError('That code is not right. Check it and try again.');
+    return { ok: true };
   }
 
   saveSettings(patch = {}) {

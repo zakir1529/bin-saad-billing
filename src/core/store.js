@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS = {
   invoicePrefix: 'BS', // invoice numbers look like BS-0042
   exchangeNote: 'Exchange possible within 3 days with receipt.', // printed at the bottom of the receipt
   lowStockAt: 7, // a suit with this many or fewer left is marked Low
+  email: { to: '', from: '', host: 'smtp.gmail.com', port: 465, resetCode: true, dailyPdf: true, backupCopy: false, lowStock: true, sendAt: '22:30' },
   liveLocked: false, // true once real selling starts: test-data clearing is then switched off for good
   receiptOffsetMm: 0, // moves the receipt left (minus) or right (plus) if the printer is off-centre
 };
@@ -38,6 +39,9 @@ function freshData() {
     payments: [], // money received later from customers who took udhaar
     stockLog: [], // every change in how many of a suit are in the shop
     recovery: null, // the forgot-password code (stored only as a hash)
+    emailSecret: '', // the sender's app password, already locked by Windows before it gets here
+    emailReset: null, // the 6-digit code sent by email (stored only as a hash)
+    emailState: { lastDaily: '', lastBackup: '' },
     counters: { billNo: 0, id: 0 },
     audit: [],
   };
@@ -74,7 +78,7 @@ class Store {
       this.data = {
         ...base,
         ...loaded,
-        settings: { ...base.settings, ...(loaded.settings || {}) },
+        settings: { ...base.settings, ...(loaded.settings || {}), email: { ...base.settings.email, ...((loaded.settings || {}).email || {}) } },
         counters: { ...base.counters, ...(loaded.counters || {}) },
       };
     } else {

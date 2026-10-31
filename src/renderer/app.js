@@ -58,7 +58,7 @@
     prices: { q: '', all: [] },
     udhaar: { q: '', list: null, sel: null, detail: null, pay: null, busy: false },
     profit: { month: monthKey(), day: '', data: null },
-    dash: null, ledger: null, sizeSel: {}, dd: null,
+    dash: null, ledger: null, sizeSel: {}, dd: null, mail: null,
     sales: { day: todayKey(), month: monthKey(), day_data: null, month_data: null },
     reveal: { on: false, today: null, timer: null, unlocked: false },
     showPw: {}, stock: { log: [] },
@@ -252,6 +252,13 @@
   async function loadProfit() {
     S.profit.data = await call('profitReport', S.profit.day || S.profit.month || monthKey());
   }
+  async function loadMail() {
+    const st = await call('emailStatus');
+    const e = (S.settings && S.settings.email) || {};
+    S.settings = await call('getSettings');
+    const c = S.settings.email || e;
+    S.mail = { to: c.to || '', from: c.from || '', resetCode: !!c.resetCode, dailyPdf: !!c.dailyPdf, lowStock: !!c.lowStock, backupCopy: !!c.backupCopy, sendAt: c.sendAt || '23:00', appPw: '', ownerPw: '', error: '', status: st };
+  }
   async function loadLedger() { S.ledger = await call('ledger'); }
   async function loadUdhaar() {
     const U = S.udhaar;
@@ -291,6 +298,7 @@
         S.form = { ...S.settings, paymentMethodsText: S.settings.paymentMethods.join(', ') };
         S.users = await call('listUsers');
         S.printers = await call('listPrinters').catch(() => []);
+        await loadMail();
         refreshInfo();
       }
       render();
@@ -338,6 +346,21 @@
           <div class="err">${esc(L.error)}</div>
         </div></div></div>`;
     }
+    if (L.mode === 'forgot' && S.status.emailReady && L.method !== 'paper') {
+      return `<div class="login"><div class="box">
+        <h1>Forgot password</h1><div class="sub">${L.codeSent ? 'A 6-digit code was sent to ' + esc(S.status.emailTo) + '. It works once and expires in 10 minutes.' : 'We will email a 6-digit code to ' + esc(S.status.emailTo) + '.'}</div>
+        <div class="stack">
+          ${L.codeSent ? `<div><label class="field" for="l-ecode">6-digit code</label><input id="l-ecode" type="text" inputmode="numeric" maxlength="6" data-bind="login.code" data-kind="digits" data-enter="resetEmailPw" value="${esc(L.code)}" autocomplete="off" data-autofocus="1" style="letter-spacing:6px;font-size:20px;text-align:center"></div>
+          <div><label class="field" for="l-npw">New password (at least 4 characters)</label>${pwInput('l-npw', 'login.password', L.password, { enter: 'resetEmailPw', label: 'New password' })}</div>
+          <div><label class="field" for="l-npw2">Type the new password again</label>${pwInput('l-npw2', 'login.password2', L.password2, { enter: 'resetEmailPw', label: 'New password again' })}</div>
+          <button class="btn primary big" data-act="resetEmailPw" ${L.busy ? 'disabled' : ''}>Set the new password</button>
+          <button class="btn" data-act="sendEmailCode" ${L.busy ? 'disabled' : ''}>Send a new code</button>`
+          : `<button class="btn primary big" data-act="sendEmailCode" ${L.busy ? 'disabled' : ''}>${L.busy ? 'Sending...' : 'Email me the code'}</button>`}
+          <div class="err">${esc(L.error)}</div>
+          <button class="link" data-act="paperMethod" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Use the paper recovery code instead</button>
+          <button class="link" data-act="backToLogin" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Back to log in</button>
+        </div></div></div>`;
+    }
     if (L.mode === 'forgot') {
       return `<div class="login"><div class="box">
         <h1>Forgot password</h1><div class="sub">${S.status.hasRecovery ? 'Type the recovery code you wrote down, then choose a new password. Your bills and data stay as they are.' : 'No recovery code was made on this computer yet. The owner can make one in Settings after logging in.'}</div>
@@ -347,6 +370,7 @@
           <div><label class="field" for="l-npw2">Type the new password again</label>${pwInput('l-npw2', 'login.password2', L.password2, { enter: 'resetPw', label: 'New password again' })}</div>
           <button class="btn primary big" data-act="resetPw" ${S.status.hasRecovery && !L.busy ? '' : 'disabled'}>Set the new password</button>
           <div class="err">${esc(L.error)}</div>
+          ${S.status.emailReady ? '<button class="link" data-act="emailMethod" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Email me a code instead</button>' : ''}
           <button class="link" data-act="backToLogin" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Back to log in</button>
         </div></div></div>`;
     }
@@ -785,6 +809,29 @@
   }
 
   // ----- settings (owner) -----
+  function emailCard() {
+    const M2 = S.mail;
+    if (!M2) return '';
+    const st = M2.status || {};
+    const tog = (k, label) => `<label class="row"><input type="checkbox" data-bind="mail.${k}" ${M2[k] ? 'checked' : ''}> ${label}</label>`;
+    return `<div class="card"><h2>Email</h2><div class="stack" style="margin-top:10px">
+      <div class="muted">${st.ready ? 'Email is set up. Codes and reports go only to the owner address below.' : 'Set this up once so a forgotten password can be reset by a 6-digit code, and the day\'s sales PDF can be emailed to you. The shop still works without internet; email waits until it is back.'}</div>
+      <div class="row"><div class="field-wrap"><label class="field" for="e-to">Owner email (codes and reports go here)</label><input id="e-to" type="text" data-bind="mail.to" value="${esc(M2.to)}" autocomplete="off"></div>
+        <div class="field-wrap"><label class="field" for="e-from">Sender Gmail (sends the emails)</label><input id="e-from" type="text" data-bind="mail.from" value="${esc(M2.from)}" autocomplete="off"></div></div>
+      <div><label class="field" for="e-app">Gmail app password ${st.secretSet ? '(saved and locked; type a new one only to change it)' : '(16 letters, from your Google account)'}</label>${pwInput('e-app', 'mail.appPw', M2.appPw, { label: 'App password' })}</div>
+      ${tog('resetCode', 'Allow a forgotten password to be reset by an emailed code')}
+      ${tog('dailyPdf', 'Email the day\'s sales PDF every night')}
+      ${tog('lowStock', 'Include items running low in that email')}
+      ${tog('backupCopy', 'Email a compressed copy of the data every night (keep that email private)')}
+      <div class="row"><div class="field-wrap" style="max-width:160px"><label class="field" for="e-at">Send at</label><input id="e-at" type="time" data-bind="mail.sendAt" value="${esc(M2.sendAt)}"></div>
+        <div class="field-wrap"><label class="field" for="e-pw">Your owner password (to save)</label>${pwInput('e-pw', 'mail.ownerPw', M2.ownerPw, { enter: 'saveMail', label: 'Owner password' })}</div></div>
+      <div class="err">${esc(M2.error || '')}</div>
+      <div class="row wrap"><button class="btn primary" data-act="saveMail">Save email settings</button>
+        <button class="btn" data-act="testMail" ${st.ready ? '' : 'disabled'}>Send a test email</button>
+        <button class="btn" data-act="sendReportNow" ${st.ready ? '' : 'disabled'}>Send today's report now</button></div>
+      <div class="muted small">Safety: the app password is locked by Windows for this user and never shown again. Codes are never saved, work once and expire in 10 minutes. After 5 wrong tries codes are blocked for 15 minutes.</div></div></div>`;
+  }
+
   function viewSettings() {
     const f = S.form;
     if (!f) return '<div class="empty">Loading...</div>';
@@ -838,6 +885,8 @@
           <div class="field-wrap"><label class="field" for="nu-u">Username</label><input id="nu-u" type="text" data-bind="newUser.username" value="${esc(S.newUser.username)}"></div>
           <div class="field-wrap"><label class="field" for="nu-p">Password</label>${pwInput('nu-p', 'newUser.password', S.newUser.password, { label: 'Staff password' })}</div>
           <button class="btn primary" style="align-self:flex-end" data-act="addUser">Add staff</button></div></div>
+
+      ${emailCard()}
 
       <div class="card"><h2>Forgot-password code</h2><div class="stack" style="margin-top:10px">
         <div class="muted">${S.recovery && S.recovery.exists ? 'A recovery code was made on ' + when(S.recovery.createdAt) + '. If the owner password is forgotten, choose <b>Forgot password?</b> on the log in screen and type the code.' : '<b style="color:var(--warn)">No recovery code yet.</b> Make one now and write it on paper. Without it, a forgotten password cannot be reset.'}</div>
@@ -1086,6 +1135,29 @@
       } catch (e) { L.error = e.message; render(); }
     },
     forgotGo() { S.login = { ...freshLogin(), mode: 'forgot' }; S.showPw = {}; render(); },
+    paperMethod() { S.login.method = 'paper'; S.login.error = ''; S.login.code = ''; render(); },
+    emailMethod() { S.login.method = 'email'; S.login.error = ''; S.login.code = ''; render(); },
+    async sendEmailCode() {
+      const L = S.login;
+      if (L.busy) return;
+      L.busy = true; L.error = ''; render();
+      try { await call('requestEmailCode'); L.codeSent = true; L.code = ''; } catch (e) { L.error = e.message; }
+      L.busy = false; render();
+    },
+    async resetEmailPw() {
+      const L = S.login;
+      if (L.busy) return;
+      if (!/^\d{6}$/.test(L.code || '')) { L.error = 'Type the 6-digit code from the email.'; render(); return; }
+      if (L.password !== L.password2) { L.error = 'The two new passwords are not the same.'; render(); return; }
+      L.busy = true; L.error = ''; render();
+      try {
+        await call('resetWithEmailCode', L.code, L.password);
+        S.login = freshLogin(); S.showPw = {};
+        render(); toast('Password changed. Log in with the new password.');
+        return;
+      } catch (e) { L.error = e.message; L.busy = false; }
+      render();
+    },
     backToLogin() { S.login = freshLogin(); S.showPw = {}; render(); },
     async resetPw() {
       const L = S.login;
@@ -1191,6 +1263,20 @@
     addSizes() { S.modal = { type: 'sizes', base: '', group: 'Kurtas', price: '', cost: '', zS: '', zM: '', zL: '', zXL: '', error: '' }; render(); },
     sizeCat(el) { S.modal.group = el.dataset.v; render(); },
     profitMonth() { S.profit.day = ''; safe(async () => { if (S.reveal.on) await loadProfit(); render(); }); },
+    async saveMail() {
+      const m = S.mail;
+      m.error = '';
+      try {
+        await call('saveEmailSettings', { to: m.to, from: m.from, resetCode: !!m.resetCode, dailyPdf: !!m.dailyPdf, lowStock: !!m.lowStock, backupCopy: !!m.backupCopy, sendAt: m.sendAt }, m.ownerPw || '');
+        if (m.appPw) await call('saveEmailPassword', m.appPw, m.ownerPw || '');
+        m.appPw = ''; m.ownerPw = '';
+        await loadMail();
+        toast('Email settings saved.');
+      } catch (e) { m.error = e.message; }
+      render();
+    },
+    async testMail() { toast('Sending...'); await call('testEmail'); toast('Test email sent. Check the owner inbox.'); },
+    async sendReportNow() { toast('Sending...'); await call('sendReportNow'); toast('Report sent.'); },
     clearBeforeAsk() { S.modal = { type: 'clearBefore', value: '', date: todayKey(), word: '', error: '' }; S.showPw = {}; render(); },
     goLiveAsk() { S.modal = { type: 'goLive', value: '', error: '' }; S.showPw = {}; render(); },
     addSuit() { S.modal = { type: 'suit', id: null, name: '', price: '', cost: '', stock: '', group: '', active: true, error: '' }; render(); },

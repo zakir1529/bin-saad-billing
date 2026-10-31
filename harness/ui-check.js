@@ -333,6 +333,13 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await shot('24-analytics-day');
   await nav('settings');
   check('settings has delete-by-date and the lock', (await text('.content')).includes('Delete test bills before a date') && (await text('.content')).includes('Start real sales'), '');
+  check('settings has an Email card with the owner address box', (await text('.content')).includes('Owner email') && (await page.locator('#e-to').count()) === 1, '');
+  await page.fill('#e-to', 'owner@example.com'); await page.fill('#e-from', 'shop@example.com'); await page.fill('#e-pw', 'wrong');
+  await page.click('[data-act=saveMail]'); await page.waitForTimeout(400);
+  check('email settings refuse a wrong owner password', (await text('.content')).toLowerCase().includes('password is wrong'), '');
+  await page.fill('#e-pw', 'owner1234'); await page.click('[data-act=saveMail]'); await page.waitForTimeout(500);
+  check('email settings save with the right password', (await text('.toast')).includes('Email settings saved'), await text('.toast'));
+  await shot('25-email-card');
   await page.click('[data-act=goLiveAsk]');
   await page.fill('#m-cpw', 'owner1234'); await page.click('[data-act=modalOk]'); await page.waitForTimeout(400);
   check('after Start real sales the clear buttons are gone', !(await text('.content')).includes('Clear all test data') && (await text('.content')).includes('switched off'), (await text('.toast')));

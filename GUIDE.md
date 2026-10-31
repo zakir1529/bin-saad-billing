@@ -118,3 +118,9 @@ Tested by the developer's tools (all passing):
 - **Ledger:** stock worth (at cost and at selling price), today and yesterday, best seller, total since opening.
 - **Start fresh:** Settings > "Delete test bills before a date" (type CLEAR + password; a backup is made first). On opening day tap **Start real sales** to switch test-clearing off for good.
 - Lighter receipt: bold only on the shop name, items and TOTAL DUE.
+
+## Version 4
+- **Menu** shows icons only and opens with names when the mouse is over it. Each icon has its own colour. Red power icon = log out. **Switch account** (owner to staff needs no password; anything else needs the password of that person) and **Lock**.
+- **Kurta / Waistcoat** items have sizes S, M, L, XL; Checkout shows one card with a size dropdown ("Only 5 left" at 7 or fewer, "Out of Stock" at 0). Suits and shawls have no size.
+- **Ledger** shows stock by category (Suits, Kurtas, Waistcoats, Shawls) with pieces and worth, and a total.
+- **Email (Settings > Email):** set the owner email, a sender Gmail and its 16-letter app password once. Then: forgotten password can be reset by a 6-digit emailed code (works once, 10 minutes, blocked 15 minutes after 5 wrong tries), the day's sales PDF is emailed each night, and an optional compressed data copy. The app password is locked by Windows and never shown again. Without internet, email waits and billing is not affected.

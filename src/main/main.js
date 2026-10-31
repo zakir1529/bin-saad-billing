@@ -1,7 +1,7 @@
 'use strict';
 
 // The program that runs on the shop PC: opens the window, keeps the data safe, and talks to the printer.
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Store } = require('../core/store');
@@ -9,6 +9,7 @@ const { Service, formatBillNo } = require('../core/service');
 const { UserError } = require('../core/errors');
 const { buildReceiptHtml, sampleBill } = require('../core/receipt');
 const { buildDayReportHtml } = require('../core/report');
+const { sendMail, gzip } = require('./smtp');
 
 let mainWindow = null;
 let store = null;
@@ -16,7 +17,7 @@ let service = null;
 let lastBackup = { ok: null, at: null, error: '', target: '' };
 let backupTimer = null;
 
-const MUTATING = new Set(['createBill', 'cancelBill', 'saveSuit', 'importSuits', 'saveUser', 'saveSettings', 'setupOwner', 'changePassword', 'receiveUdhaar', 'addStock', 'importStock', 'createRecoveryCode', 'resetWithRecovery', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'setBasePrice', 'deleteSuit']);
+const MUTATING = new Set(['createBill', 'cancelBill', 'saveSuit', 'importSuits', 'saveUser', 'saveSettings', 'setupOwner', 'changePassword', 'receiveUdhaar', 'addStock', 'importStock', 'createRecoveryCode', 'resetWithRecovery', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'setBasePrice', 'deleteSuit', 'saveEmailSettings', 'resetWithEmailCode', 'switchAccount']);
 
 // ---------- a small log file, and nothing is allowed to crash the program ----------
 function logLine(text) {
@@ -58,6 +59,8 @@ function start() {
   registerIpc();
   createWindow();
   scheduleBackup(2000);
+  setInterval(emailTick, 5 * 60000);
+  setTimeout(emailTick, 60000);
 }
 
 function createWindow() {
@@ -180,6 +183,88 @@ function receiptFor(id) {
   return { bill, settings, html: buildReceiptHtml(bill, settings, { duplicate: (bill.printCount || 0) > 0 }) };
 }
 
+async function makeDayPdf(dateKey) {
+  const { report, bills, html } = service._asOwner(() => {
+    const report = service.dailyReport(dateKey);
+    const bills = service.searchBills({ from: report.dateKey, to: report.dateKey, limit: 500 });
+    return { report, bills, html: buildDayReportHtml(report, bills, service.getSettings()) };
+  });
+  const tmpDir = path.join(app.getPath('userData'), 'tmp');
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const tmp = path.join(tmpDir, 'day-report.html');
+  fs.writeFileSync(tmp, html, 'utf8');
+  const win = new BrowserWindow({ show: false, width: 900, height: 1200, webPreferences: { sandbox: true, contextIsolation: true } });
+  try {
+    await win.loadFile(tmp);
+    const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { marginType: 'default' } });
+    return { pdf, report, bills };
+  } finally {
+    win.destroy();
+  }
+}
+
+// ---------- email helpers ----------
+function emailConfig() {
+  const e = store.data.settings.email;
+  const blob = service._getEmailSecret();
+  if (!e.to || !e.from || !blob) throw new UserError('Email is not set up yet. Fill in the Email card in Settings first.');
+  let pass;
+  try { pass = safeStorage.decryptString(Buffer.from(blob, 'base64')); } catch (err) { throw new UserError('The saved email password cannot be read on this computer. Save it again in Settings.'); }
+  return { e, pass };
+}
+async function mail(subject, text, attachments = [], toOverride) {
+  const { e, pass } = emailConfig();
+  await sendMail({ host: e.host || 'smtp.gmail.com', port: e.port || 465, user: e.from, pass, from: `Bin Saad Billing <${e.from}>`, to: toOverride || e.to, subject, text, attachments });
+}
+const todayKeyMain = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+
+async function sendDaily(force) {
+  const e = store.data.settings.email;
+  const key = todayKeyMain();
+  const { pdf, report } = await makeDayPdf(key);
+  const lines = [`Bin Saad Fabrics: sales for ${key}`, '', `Bills: ${report.bills}`, `Sales: Rs ${Number(report.sales).toLocaleString('en-US')}`];
+  if (e.lowStock) {
+    const d = service._asOwner(() => service.dashboard());
+    lines.push('', d.low.length ? 'Running low or out:' : 'Nothing is running low.');
+    for (const x of d.low) lines.push(`  ${x.name}: ${x.stock === 0 ? 'OUT' : x.stock + ' left'}`);
+  }
+  await mail(`Bin Saad sales ${key}`, lines.join('\n'), e.dailyPdf || force ? [{ filename: `Sales-${key}.pdf`, content: pdf, type: 'application/pdf' }] : []);
+  service._markEmailSent('daily', key);
+}
+async function sendBackupMail() {
+  const key = todayKeyMain();
+  const buf = gzip(fs.readFileSync(store.file));
+  if (buf.length > 20 * 1024 * 1024) throw new UserError('The data file is too large to email. Use the USB drive.');
+  await mail(`Bin Saad backup ${key}`, 'A copy of the shop data is attached (compressed). Keep this email private. Only the owner address receives it.', [{ filename: `binsaad-${key}.json.gz`, content: buf, type: 'application/gzip' }]);
+  service._markEmailSent('backup', key);
+}
+let emailRetryAt = 0;
+async function emailTick() {
+  try {
+    if (!store || !service || Date.now() < emailRetryAt) return;
+    const e = store.data.settings.email;
+    if (!e || !e.to || !e.from || !service._getEmailSecret()) return;
+    const now = new Date();
+    const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    if (hhmm < (e.sendAt || '22:30')) return;
+    const key = todayKeyMain();
+    const st = store.data.emailState || {};
+    if ((e.dailyPdf || e.lowStock) && st.lastDaily !== key) await sendDaily(false);
+    if (e.backupCopy && st.lastBackup !== key) await sendBackupMail();
+  } catch (err) {
+    logLine('email: ' + (err && err.message ? err.message : err));
+    emailRetryAt = Date.now() + 30 * 60000; // try again in half an hour
+  }
+}
+// tell the owner when a password changes, if email is set up
+function notifyPasswordChange(how) {
+  try {
+    const e = store.data.settings.email;
+    if (!e || !e.to || !e.from || !service._getEmailSecret()) return;
+    mail('Bin Saad: a password was changed', `The owner password was changed (${how}) on ${new Date().toLocaleString('en-GB')}. If this was not you, use the paper recovery code and check the shop computer.`).catch((err) => logLine('email: ' + err.message));
+  } catch (err) { /* never block the change itself */ }
+}
+
 const EXTRA = {
   async printBill(id) {
     const { bill, html } = receiptFor(id);
@@ -214,27 +299,43 @@ const EXTRA = {
   // The day's sales as an A4 PDF in Documents\Bin Saad Reports. Owner only.
   async dailyReportPdf(dateKey) {
     service._requireOwner();
-    const report = service.dailyReport(dateKey);
-    const bills = service.searchBills({ from: report.dateKey, to: report.dateKey, limit: 500 });
-    const html = buildDayReportHtml(report, bills, service.getSettings());
-    const tmpDir = path.join(app.getPath('userData'), 'tmp');
-    fs.mkdirSync(tmpDir, { recursive: true });
-    const tmp = path.join(tmpDir, 'day-report.html');
-    fs.writeFileSync(tmp, html, 'utf8');
-    const win = new BrowserWindow({ show: false, width: 900, height: 1200, webPreferences: { sandbox: true, contextIsolation: true } });
-    try {
-      await win.loadFile(tmp);
-      const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { marginType: 'default' } });
-      const dir = path.join(app.getPath('documents'), 'Bin Saad Reports');
-      fs.mkdirSync(dir, { recursive: true });
-      const file = path.join(dir, `Sales-${report.dateKey}.pdf`);
-      fs.writeFileSync(file, pdf);
-      shell.showItemInFolder(file);
-      return { file };
-    } finally {
-      win.destroy();
-    }
+    const { pdf, report } = await makeDayPdf(dateKey);
+    const dir = path.join(app.getPath('documents'), 'Bin Saad Reports');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `Sales-${report.dateKey}.pdf`);
+    fs.writeFileSync(file, pdf);
+    shell.showItemInFolder(file);
+    return { file };
   },
+
+  // ----- email -----
+  // The sender's app password is locked by Windows for this user before it is stored. It never goes to a screen.
+  saveEmailPassword(appPassword, ownerPassword) {
+    service._requireOwner();
+    if (!service.verifyPassword(ownerPassword)) throw new UserError('The password is wrong.');
+    if (!appPassword) { service._setEmailSecret(''); return { saved: false }; }
+    if (!safeStorage.isEncryptionAvailable()) throw new UserError('Windows cannot lock the password on this computer, so it was not saved.');
+    const clean = String(appPassword).replace(/\s+/g, '');
+    if (clean.length < 8 || clean.length > 64) throw new UserError('That does not look like a Gmail app password (it has 16 letters).');
+    service._setEmailSecret(safeStorage.encryptString(clean).toString('base64'));
+    return { saved: true };
+  },
+
+  async testEmail() {
+    service._requireOwner();
+    await mail('Bin Saad test email', 'This is a test. If you can read it, email is working. Nothing else was sent.');
+    return { sent: true };
+  },
+
+  // Anyone at the login screen can ask. The code goes only to the owner's email address, never back to the screen.
+  async requestEmailCode() {
+    const { code, to } = service._beginEmailReset();
+    await mail('Your Bin Saad password reset code', `Your code is ${code}\n\nIt works once and expires in 10 minutes. If you did not ask for it, ignore this email: nobody can get in with it unless they also have this code.`, [], to);
+    return { sent: true };
+  },
+
+  async sendReportNow() { service._requireOwner(); await sendDaily(true); return { sent: true }; },
+  async sendBackupNow() { service._requireOwner(); await sendBackupMail(); return { sent: true }; },
 
   async testPrint() {
     service._requireOwner();
@@ -305,6 +406,9 @@ function registerIpc() {
       if (Object.prototype.hasOwnProperty.call(EXTRA, method)) value = await EXTRA[method](...(args || []));
       else value = service.call(method, args);
       if (MUTATING.has(method)) scheduleBackup(4000);
+      if (method === 'changePassword') notifyPasswordChange('from Settings');
+      if (method === 'resetWithRecovery') notifyPasswordChange('with the paper recovery code');
+      if (method === 'resetWithEmailCode') notifyPasswordChange('with an emailed code');
       return { ok: true, value };
     } catch (e) {
       const isUser = !!(e && e.userError);
