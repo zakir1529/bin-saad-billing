@@ -946,7 +946,10 @@ test('smtp: sends a mail with an attachment to a fake server over a plain test c
   const net = require('net');
   const { sendMail } = require('../src/main/smtp');
   const got = { lines: [] };
+  const sockets = new Set();
   const server = net.createServer((c) => {
+    sockets.add(c);
+    c.on('error', () => {});
     c.write('220 fake ready\r\n');
     let data = false; let msg = '';
     c.on('data', (b) => {
@@ -967,7 +970,9 @@ test('smtp: sends a mail with an attachment to a fake server over a plain test c
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
   const r = await sendMail({ host: '127.0.0.1', port, secure: false, user: 'shop@example.com', pass: 'abcd efgh ijkl mnop', to: 'owner@example.com', subject: 'Daily report', text: 'Hello Rs 5,000', attachments: [{ filename: 'a.txt', content: Buffer.from('file body') }] });
-  server.close();
+  for (const c of sockets) c.destroy();
+  await new Promise((res) => server.close(res));
+  await new Promise((res) => setTimeout(res, 100));
   assert.equal(r.sent, true);
   assert.ok(got.lines.some((l) => l.startsWith('RCPT TO:<owner@example.com>')));
   assert.ok(got.msg.includes('filename="a.txt"') && got.msg.includes(Buffer.from('file body').toString('base64')));
