@@ -439,7 +439,7 @@
     const on = S.reveal.on;
     const v = (n) => (on ? money(n) : DOTS);
     const hr = new Date().getHours();
-    const hello = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+    const hello = hr >= 5 && hr < 12 ? 'Good morning' : hr >= 12 && hr < 17 ? 'Good afternoon' : hr >= 17 && hr < 21 ? 'Good evening' : 'Good night';
     const dateTxt = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const week = d.week || [];
     const val = (w) => (owner ? w.sales : w.bills);
