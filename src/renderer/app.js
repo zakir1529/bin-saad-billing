@@ -227,7 +227,7 @@
   // ---------- hidden figures (the eye button) ----------
   function hideReveal() {
     clearTimeout(S.reveal.timer);
-    S.reveal = { on: false, today: null, timer: null, unlocked: S.reveal.unlocked };
+    S.reveal = { on: false, today: null, timer: null, unlocked: false };
     S.sales.day_data = null;
     S.sales.month_data = null;
     S.profit.data = null;
@@ -245,7 +245,7 @@
   }
   async function toggleReveal() {
     if (S.reveal.on) return hideReveal();
-    // The password is asked once each time the program is opened. After that the eye just shows and hides.
+    // The password is asked every time, so figures never stay open for someone standing nearby.
     if (S.settings.revealNeedsPassword && !S.reveal.unlocked) { S.modal = { type: 'password', error: '' }; render(); return; }
     await doReveal();
   }
@@ -436,66 +436,39 @@
     const d = S.dash;
     if (!d) return '<div class="empty">Loading...</div>';
     const owner = S.user.role === 'owner';
-    const on = S.reveal.on;
-    const v = (n) => (on ? money(n) : DOTS);
     const hr = new Date().getHours();
     const hello = hr >= 5 && hr < 12 ? 'Good morning' : hr >= 12 && hr < 17 ? 'Good afternoon' : hr >= 17 && hr < 21 ? 'Good evening' : 'Good night';
     const dateTxt = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const week = d.week || [];
-    const val = (w) => (owner ? w.sales : w.bills);
     const dayName = (k) => new Date(k + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short' });
-    // sales line (last 7 days)
-    const W = 640; const H = 150; const peak = Math.max(1, ...week.map(val));
-    const real = on || !owner;
-    const pts = week.map((w, n) => [Math.round((n / Math.max(1, week.length - 1)) * (W - 24)) + 12, real ? Math.round(H - 14 - (val(w) / peak) * (H - 34)) : H / 2]);
-    const line = pts.map((q, n) => (n ? 'L' : 'M') + q[0] + ' ' + q[1]).join(' ');
-    const chart = `<svg class="area" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9a35b" stop-opacity=".45"/><stop offset="1" stop-color="#c9a35b" stop-opacity="0"/></linearGradient></defs>
-      ${real ? `<path d="${line} L${pts[pts.length - 1][0]} ${H} L${pts[0][0]} ${H}Z" fill="url(#ag)"/>` : ''}
-      <path d="${line}" fill="none" stroke="#f3d98e" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" ${real ? '' : 'stroke-dasharray="3 9" opacity=".5"'}/>
-      ${real ? pts.map((q, n) => `<circle cx="${q[0]}" cy="${q[1]}" r="${n === pts.length - 1 ? 6 : 3.5}" fill="${n === pts.length - 1 ? '#f3d98e' : '#18181b'}" stroke="#f3d98e" stroke-width="2"/>`).join('') : ''}</svg>
-      <div class="axis">${week.map((w) => `<span>${esc(dayName(w.dateKey))}</span>`).join('')}</div>`;
-    const yest = week.length > 1 ? week[week.length - 2].sales : 0;
-    let trend = '';
-    if (owner && on) {
-      if (!yest) trend = '<span class="pill ok">First sales to compare</span>';
-      else { const pc = Math.round(((d.sales - yest) / yest) * 100); trend = pc >= 0 ? `<span class="pill ok">&#9650; ${pc}% more than yesterday</span>` : `<span class="pill bad">&#9660; ${-pc}% less than yesterday</span>`; }
-    }
-    // payment donut
-    const COL = ['#6fd39a', '#c9a35b', '#f08a9b', '#7fb2ff', '#b79cf0'];
-    const methods = Object.entries(d.byMethod || {}).sort((a, b) => b[1] - a[1]);
-    const mTotal = methods.reduce((n, m) => n + m[1], 0);
-    let off = 0;
-    const C = 276.46;
-    const arcs = methods.map(([k, n], i) => { const len = (n / (mTotal || 1)) * C; const a = `<circle cx="60" cy="60" r="44" fill="none" stroke="${COL[i % COL.length]}" stroke-width="16" stroke-dasharray="${Math.max(0, len - 2).toFixed(1)} ${C}" stroke-dashoffset="${(-off).toFixed(1)}" transform="rotate(-90 60 60)"/>`; off += len; return a; }).join('');
-    const legend = methods.map(([k, n], i) => `<div class="lg"><i style="background:${COL[i % COL.length]}"></i><span>${esc(k)}</span><b class="num">${on ? Math.round((n / mTotal) * 100) + '%' : DOTS}</b></div>`).join('') || '<div class="muted small">No sales yet today.</div>';
-    const avg = d.bills ? Math.round((d.sales || 0) / d.bills) : 0;
-    const kpi = (k, x, sub, tone) => `<div class="stat ${tone}"><div class="k">${k}</div><div class="v num">${x}</div><div class="muted small" style="margin-top:4px">${sub}</div></div>`;
+    const peak = Math.max(1, ...week.map((w) => w.bills));
+    const bars = week.map((w, n) => `<div class="bar ${n === week.length - 1 ? 'now' : ''}" title="${esc(dayName(w.dateKey))}: ${w.bills} bills"><b class="bn">${w.bills || ''}</b><i style="height:${Math.max(5, Math.round((w.bills / peak) * 100))}%"></i><span>${esc(dayName(w.dateKey))}</span></div>`).join('');
+    const catTotal = (d.categories || []).reduce((n, c) => n + c.qty, 0) || 1;
+    const CC = { Suits: '#c9a35b', Kurtas: '#6fd39a', Waistcoats: '#f0b35a', Shawls: '#b79cf0' };
+    const catRows = (d.categories || []).map((c) => `<div class="crow"><span class="cn">${esc(c.name)}</span><div class="cbar"><i style="width:${Math.max(4, Math.round((c.qty / catTotal) * 100))}%;background:${CC[c.name] || '#7fb2ff'}"></i></div><b class="num">${Math.round((c.qty / catTotal) * 100)}%</b></div>`).join('') || '<div class="muted small">Sales this week will show up here.</div>';
     const topMax = Math.max(1, ...(d.top || []).map((t) => t.qty));
-    const topRows = (d.top || []).map((t, n) => `<div class="mrow"><span class="rank">${n + 1}</span><span class="tn">${esc(t.name)}</span><div class="mbar gold"><i style="width:${Math.round((t.qty / topMax) * 100)}%"></i></div><b class="num">${t.qty}</b></div>`).join('') || '<div class="muted small">Sales this week will show up here.</div>';
+    const topRows = (d.top || []).map((t, n) => `<div class="mrow"><span class="rank">${n + 1}</span><span class="tn">${esc(t.name)}</span><div class="mbar gold"><i style="width:${Math.round((t.qty / topMax) * 100)}%"></i></div><b class="num">${t.qty}</b></div>`).join('') || '<div class="muted small">Nothing sold yet this week.</div>';
     const lowRows = d.low.map((x) => `<div class="lrow"><span><b>${esc(x.base || x.name)}</b>${x.size ? '<span class="subtag" style="margin-left:8px">' + esc(x.size) + '</span>' : ''}</span>${x.stock === 0 ? '<span class="pill bad">Out of stock</span>' : '<span class="pill warn">Only ' + x.stock + ' left</span>'}</div>`).join('') || '<div class="allgood">&#10003; Everything is in stock</div>';
+    const kc = (cls, ic, k, val, sub) => `<div class="kc ${cls}"><div class="kic">${icon(ic)}</div><div class="kk">${k}</div><div class="kv num">${val}</div><div class="ks">${sub}</div></div>`;
     return `<div class="hero"><div><div class="hello">${hello}, ${esc(S.user.name)}</div><div class="muted">${esc(dateTxt)} &middot; ${esc(S.settings.shopName)}</div></div>
-        <div class="row wrap"><button class="btn primary big" data-act="nav" data-view="billing">+ New bill</button></div></div>
-      <div class="dgrid">
-        <div class="card sales"><div class="k">${owner ? "Today's sales" : 'Bills today'}</div>
-          <div class="bigv num">${owner ? v(d.sales || 0) : d.bills}</div>
-          <div class="row wrap" style="gap:10px">${trend}<span class="muted small">${d.bills} bill${d.bills === 1 ? '' : 's'} &middot; ${d.items} piece${d.items === 1 ? '' : 's'} sold</span></div>
-          <div class="chartbox">${chart}</div><div class="muted small">Last 7 days</div></div>
-        ${owner ? `<div class="card"><h2>Paid by</h2><div class="muted small">Money received today</div>
-          <div class="donutbox"><svg viewBox="0 0 120 120" width="150"><circle cx="60" cy="60" r="44" fill="none" stroke="#26262b" stroke-width="16"/>${on ? arcs : ''}<text x="60" y="58" text-anchor="middle" fill="#f3d98e" font-size="13" font-weight="800">${on ? methods.length : ''}</text><text x="60" y="73" text-anchor="middle" fill="#c6c8cf" font-size="8">${on ? 'methods' : 'hidden'}</text></svg></div>
-          <div class="legend">${legend}</div></div>` : `<div class="card"><h2>Best sellers this week</h2><div class="muted small">Pieces sold</div><div class="mlist">${topRows}</div></div>`}
+        <button class="btn primary big" data-act="nav" data-view="billing">+ New bill</button></div>
+      <div class="kcards">
+        ${kc('k-gold', 'billing', 'Bills today', d.bills, d.bills === 1 ? 'sale made so far' : 'sales made so far')}
+        ${kc('k-teal', 'inventory', 'Pieces sold', d.items, 'handed over today')}
+        ${kc(d.low.length ? 'k-amber' : 'k-green', 'ledger', 'Needs attention', d.low.length, d.low.length ? 'items low or out' : 'everything stocked')}
+        ${owner ? kc('k-rose', 'udhaar', 'Udhaar customers', d.udhaarCustomers || 0, 'still to pay') : kc('k-navy', 'bills', 'This week', d.weekBills, 'bills in 7 days')}
       </div>
-      <div class="stats" style="margin:14px 0">
-        ${owner ? kpi('Average bill', v(avg), 'per customer today', 'gold') : kpi('Pieces sold', d.items, 'today', 'gold')}
-        ${owner ? kpi('Udhaar owed', v(d.udhaarOwed || 0), 'still to collect', 'rose') : ''}
-        ${kpi('Needs attention', d.low.length, d.low.length ? 'items low or out' : 'all stocked', d.low.length ? 'amber' : 'green')}
-        ${kpi('Bills today', d.bills, 'made so far', 'blue')}
+      <div class="dgrid">
+        <div class="card"><h2>Last 7 days</h2><div class="muted small">Bills per day</div><div class="bars">${bars}</div></div>
+        <div class="card"><h2>What is selling</h2><div class="muted small">Share of pieces sold this week</div><div class="clist">${catRows}</div></div>
       </div>
       <div class="dgrid3">
         <div class="card"><h2>Running low</h2><div class="muted small">Order these first</div><div class="llist">${lowRows}</div></div>
-        ${owner ? `<div class="card"><h2>Best sellers this week</h2><div class="muted small">Pieces sold</div><div class="mlist">${topRows}</div></div>` : ''}
+        <div class="card"><h2>Best sellers this week</h2><div class="muted small">Pieces sold</div><div class="mlist">${topRows}</div></div>
         <div class="card" style="padding:0;overflow:hidden"><div style="padding:18px 18px 6px"><h2>Recent bills</h2></div><table><tbody>
-          ${d.recent.map((b) => `<tr><td><b>${esc(b.invoice || '')}</b> ${b.status === 'cancelled' ? '<span class="pill off">Cancelled</span>' : ''}<div class="muted small">${esc(when(b.at))}</div></td><td class="right num"><b>${money(b.total)}</b></td></tr>`).join('') || '<tr><td class="empty">No bills yet.</td></tr>'}</tbody></table></div>
-      </div>`;
+          ${d.recent.map((b) => `<tr><td><b>${esc(b.invoice || '')}</b> ${b.status === 'cancelled' ? '<span class="pill off">Cancelled</span>' : ''}<div class="muted small">${esc(when(b.at))}</div></td><td class="right"><span class="pill ok">${esc(b.method || '')}</span></td></tr>`).join('') || '<tr><td class="empty">No bills yet.</td></tr>'}</tbody></table></div>
+      </div>
+      <div class="muted small" style="margin-top:12px">Money figures are not shown here. Owners can see them in Sales and Analytics after clicking the eye.</div>`;
   }
 
   // ----- ledger (owner, hidden until the eye is clicked) -----
@@ -1005,7 +978,7 @@
       return `<div class="overlay"><div class="dialog"><h2>${m.id ? 'Edit suit' : 'Add a suit'}</h2><div class="stack">
         <div><label class="field" for="m-name">Suit name (no company name needed)</label><input id="m-name" type="text" data-bind="modal.name" data-enter="modalOk" data-autofocus="1" value="${esc(m.name)}"></div>
         <div class="row"><div class="field-wrap"><label class="field" for="m-price">Selling price (Rs.)</label><input id="m-price" type="text" inputmode="numeric" data-bind="modal.price" data-kind="digits" data-enter="modalOk" value="${esc(m.price)}"></div>
-          <div class="field-wrap"><label class="field" for="m-cost">Cost price (Rs.), for profit</label><input id="m-cost" type="text" inputmode="numeric" data-bind="modal.cost" data-kind="digits" data-enter="modalOk" value="${esc(m.cost)}" placeholder="Optional"></div></div>
+          <div class="field-wrap"><label class="field" for="m-cost">Cost price (Rs.), for profit</label><input id="m-cost" type="${S.reveal.on ? 'text' : 'password'}" autocomplete="off" inputmode="numeric" data-bind="modal.cost" data-kind="digits" data-enter="modalOk" value="${esc(m.cost)}" placeholder="Optional"></div></div>
         <div class="row"><div class="field-wrap"><label class="field" for="m-group">Group (optional)</label><input id="m-group" list="groups" type="text" data-bind="modal.group" data-enter="modalOk" value="${esc(m.group)}"><datalist id="groups">${groups.map((g) => `<option value="${esc(g)}">`).join('')}</datalist></div>
           <div class="field-wrap"><label class="field" for="m-stock">In stock now</label><input id="m-stock" type="text" inputmode="numeric" data-bind="modal.stock" data-kind="digits" data-enter="modalOk" value="${esc(m.stock)}" placeholder="Empty = not counted"></div></div>
         ${m.base ? `<label class="row"><input type="checkbox" data-bind="modal.allSizes" ${m.allSizes ? 'checked' : ''}> Use this price and cost for all sizes of ${esc(m.base)}</label>` : ''}
@@ -1052,7 +1025,7 @@
         <div><label class="field" for="m-base">Name (for example Kurta Black). Suits and shawls have no size, add them with Add a suit.</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}" ${m.edit ? 'disabled' : ''}></div>
         ${m.edit ? '<div class="muted small">The price below is used for every size of this item. A size you leave empty keeps its current stock.</div>' : ''}<div class="chips">${cats.map((g) => `<button class="chip ${m.group === g ? 'on' : ''}" data-act="sizeCat" data-v="${g}">${g}</button>`).join('')}</div>
         <div class="row"><div class="field-wrap"><label class="field" for="m-sp">Selling price (Rs.)</label><input id="m-sp" type="text" inputmode="numeric" data-bind="modal.price" data-kind="digits" value="${esc(m.price)}"></div>
-          <div class="field-wrap"><label class="field" for="m-sc">Cost price (Rs.)</label><input id="m-sc" type="text" inputmode="numeric" data-bind="modal.cost" data-kind="digits" value="${esc(m.cost)}" placeholder="Optional"></div></div>
+          <div class="field-wrap"><label class="field" for="m-sc">Cost price (Rs.)</label><input id="m-sc" type="${S.reveal.on ? 'text' : 'password'}" autocomplete="off" inputmode="numeric" data-bind="modal.cost" data-kind="digits" value="${esc(m.cost)}" placeholder="Optional"></div></div>
         <div class="muted small">How many pieces of each size are in the shop? Leave a size empty if you do not stock it.</div>
         <div class="row">${['S', 'M', 'L', 'XL'].map((z) => `<div class="field-wrap"><label class="field" for="m-z${z}">${z}</label><input id="m-z${z}" type="text" inputmode="numeric" data-bind="modal.z${z}" data-kind="digits" value="${esc(m['z' + z])}"></div>`).join('')}</div>
         <div class="err">${esc(m.error)}</div>

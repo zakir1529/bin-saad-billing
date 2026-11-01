@@ -1008,5 +1008,5 @@ test('monthly figures: cancelled bills are left out and month = sum of days = da
   assert.equal(r.byDay.reduce((n, d) => n + d.profit, 0), r.profit);
   assert.equal(ctx.svc.profitReport('2026-10-29').sales, 3000);
   const d = ctx.svc.dashboard();
-  assert.equal(d.week.reduce((n, w) => n + w.sales, 0), 4200);
+  assert.equal(d.week.reduce((n, w) => n + w.bills, 0), 2); assert.equal(d.sales, undefined);
 });
