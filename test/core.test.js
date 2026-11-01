@@ -994,3 +994,19 @@ test('range report adds up several days and rejects bad ranges', () => {
   const html = require('../src/core/report').buildRangeReportHtml(r, ctx.svc.searchBills({ from: '2026-10-26', to: '2026-10-28', limit: 50 }), ctx.svc.getSettings());
   assert.ok(html.includes('26-10-2026') && html.includes('Day by day'));
 });
+
+test('monthly figures: cancelled bills are left out and month = sum of days = dashboard week', () => {
+  const ctx = profitCtx();
+  const mk = (day, qty, over = {}) => { ctx.clock.t = new Date(2026, 9, day, 12, 0, 0); return ctx.svc.createBill(bill(ctx, { lines: [{ suitId: ctx.plain.id, qty }], received: 1200 * qty, ...over })).bill; };
+  mk(27, 1);                                   // 1200, cost 700
+  const c = mk(28, 2);                         // 2400, cost 1400, will be cancelled
+  mk(29, 3, { discount: { type: 'amt', value: 600 }, received: 3000 }); // 3000, cost 2100
+  ctx.svc.cancelBill(c.id, 'Customer changed mind');
+  const r = ctx.svc.profitReport('2026-10');
+  assert.deepEqual([r.sales, r.cost, r.profit, r.discounts], [4200, 2800, 1400, 600]);
+  assert.equal(r.byDay.reduce((n, d) => n + d.sales, 0), r.sales);
+  assert.equal(r.byDay.reduce((n, d) => n + d.profit, 0), r.profit);
+  assert.equal(ctx.svc.profitReport('2026-10-29').sales, 3000);
+  const d = ctx.svc.dashboard();
+  assert.equal(d.week.reduce((n, w) => n + w.sales, 0), 4200);
+});

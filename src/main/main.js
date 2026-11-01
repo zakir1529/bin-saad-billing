@@ -89,7 +89,7 @@ function setupAutoUpdate() {
 }
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({ icon: path.join(__dirname, '..', 'renderer', 'icon.png'),
     width: 1366,
     height: 800,
     minWidth: 1100,
@@ -259,7 +259,7 @@ async function sendDaily(force) {
 async function sendBackupMail() {
   const key = todayKeyMain();
   const buf = gzip(fs.readFileSync(store.file));
-  if (buf.length > 20 * 1024 * 1024) throw new UserError('The data file is too large to email. Use the USB drive.');
+  if (buf.length > 20 * 1024 * 1024) throw new UserError('The data file is too large to email. Use Back up now instead.');
   await mail(`Bin Saad backup ${key}`, 'A copy of the shop data is attached (compressed). Keep this email private. Only the owner address receives it.', [{ filename: `binsaad-${key}.json.gz`, content: buf, type: 'application/gzip' }]);
   service._markEmailSent('backup', key);
 }
