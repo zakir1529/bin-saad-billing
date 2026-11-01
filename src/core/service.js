@@ -1035,9 +1035,18 @@ class Service {
     const low = this.d.suits.filter((x) => x.active && x.stock !== null && x.stock !== undefined && x.stock <= this.d.settings.lowStockAt)
       .sort((a, b) => a.stock - b.stock).slice(0, 12).map((x) => ({ id: x.id, name: x.name, stock: x.stock }));
     const recent = this.d.bills.slice(-6).reverse().map((b) => ({ id: b.id, invoice: b.invoice, at: b.createdAt, total: b.total, method: b.method, status: b.status }));
-    const out = { bills: todays.length, items: todays.reduce((n, b) => n + b.lines.reduce((m, l) => m + l.qty, 0), 0), low, recent };
+    const days7 = [];
+    const base = this.now();
+    for (let i = 6; i >= 0; i--) { const t = new Date(base.getTime()); t.setDate(t.getDate() - i); days7.push(dateKeyOf(t)); }
+    const week = days7.map((k) => { const bs = paid.filter((b) => b.dateKey === k); return { dateKey: k, bills: bs.length, sales: bs.reduce((n, b) => n + b.total, 0) }; });
+    const sold = new Map();
+    for (const b of paid.filter((q) => q.dateKey >= days7[0])) for (const l of b.lines) sold.set(l.name, (sold.get(l.name) || 0) + l.qty);
+    const top = [...sold.entries()].sort((x, y) => y[1] - x[1]).slice(0, 5).map(([name, qty]) => ({ name, qty }));
+    const out = { week: week.map((w) => (owner ? w : { dateKey: w.dateKey, bills: w.bills })), top, bills: todays.length, items: todays.reduce((n, b) => n + b.lines.reduce((m, l) => m + l.qty, 0), 0), low, recent };
     if (owner) {
       out.sales = todays.reduce((n, b) => n + b.total, 0);
+      out.byMethod = {};
+      for (const b of todays) out.byMethod[b.method] = (out.byMethod[b.method] || 0) + b.total;
       out.udhaarOwed = [...this._udhaarCustomers().values()].reduce((n, c) => n + Math.max(0, c.balance), 0);
     }
     return out;

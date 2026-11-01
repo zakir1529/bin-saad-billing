@@ -3,7 +3,7 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 
-const BASE = 'http://127.0.0.1:8765';
+const BASE = 'http://127.0.0.1:' + (process.env.PORT || 8765);
 const OUT = process.env.SHOTS || '/tmp/bs-shots';
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -308,13 +308,21 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await shot('21-sizes-dialog');
   await page.click('[data-act=modalOk]');
   await page.waitForTimeout(400);
-  check('sizes were added: Kurta Black (M) is in the price list', (await text('.content')).includes('Kurta Black (M)'), (await text('.toast')));
+  check('inventory shows one Kurta Black row, sizes hidden until the arrow is clicked', (await text('.content')).includes('Kurta Black') && !(await text('.content')).includes('Kurta Black (M)'));
+  await page.click('[data-act=invToggle]'); await page.waitForTimeout(150);
+  check('sizes were added: Kurta Black (M) shows when the arrow opens', (await text('.content')).includes('Kurta Black (M)'), (await text('.toast')));
+  await shot('22-inventory-grouped');
+  await page.click('[data-act=editAllSizes]'); await page.waitForTimeout(150);
+  check('Edit all sizes opens with the current stock filled in', (await page.inputValue('#m-zM')) === '5' && (await page.inputValue('#m-sp')) === '3000');
+  await page.fill('#m-zM', '9'); await page.click('[data-act=modalOk]'); await page.waitForTimeout(400);
+  await page.click('[data-act=invToggle]'); await page.waitForTimeout(150); if (!(await text('.content')).includes('Kurta Black (M)')) await page.click('[data-act=invToggle]');
+  check('Edit all sizes saved the new stock for M', /Kurta Black \(M\)[\s\S]{0,200}9/.test(await text('.content')));
   await nav('billing');
   await page.click('.chip:has-text("Kurtas")', { timeout: 5000 });
   check('checkout shows one Kurta Black card with a size dropdown, filtered by category', (await text('.tiles')).includes('Kurta Black') && (await page.locator('.ddbtn').count()) === 1 && !(await text('.tiles')).includes('Navy Blue'), await text('.tiles'));
   await page.click('.ddbtn');
   const opts = await page.locator('.ddopt').allInnerTexts();
-  check('the dropdown lists S, M, L with their stock (low ones say Only N left)', opts.some((o) => /M\s*Only 5 left/.test(o)) && opts.some((o) => /S\s*Only 2 left/.test(o)), opts.join(' | '));
+  check('the dropdown lists S, M, L with their stock (low ones say Only N left)', opts.some((o) => /M\s*9 in stock/.test(o)) && opts.some((o) => /S\s*Only 2 left/.test(o)), opts.join(' | '));
   await shot('22b-size-picker');
   await page.click('.ddopt:has-text("Size M")');
   await page.click('.cardtile [data-act=tile]');

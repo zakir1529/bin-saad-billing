@@ -55,7 +55,7 @@
     status: null, user: null, settings: null, suits: [],
     view: 'billing', search: '', group: 'All', bill: null, saving: false, done: null,
     bills: { text: '', from: '', to: '', state: '', list: null, sel: null, preview: null },
-    prices: { q: '', all: [] },
+    prices: { q: '', all: [], open: {} },
     udhaar: { q: '', list: null, sel: null, detail: null, pay: null, busy: false },
     profit: { month: monthKey(), day: '', data: null },
     dash: null, ledger: null, sizeSel: {}, dd: null, mail: null,
@@ -418,8 +418,8 @@
     return `<div class="shell">
       <div class="navwrap"><nav class="nav">
         <div class="brand"><img class="brandmark" src="logo-mark.jpg" alt=""><img class="brandlogo" src="logo.jpg" alt="${esc(S.settings.shopName)}"></div>
-        ${items.map(([v, label]) => `<button class="item ${S.view === v ? 'on' : ''}" data-act="nav" data-view="${v}">${icon(v)}<span>${label}</span></button>`).join('')}
-        <div class="who"><b>${esc(S.user.name)}</b>${owner ? 'Owner' : 'Staff'}<div class="whobtns"><button class="swbtn" data-act="switchOpen">${SWITCH_ICO}<span>Switch</span></button><button class="outbtn" data-act="logout">${POWER_ICO}<span>Log out</span></button></div></div>
+        <div class="navitems">${items.map(([v, label]) => `<button class="item ${S.view === v ? 'on' : ''}" data-act="nav" data-view="${v}">${icon(v)}<span>${label}</span></button>`).join('')}</div>
+        <div class="who"><div class="whoname"><b>${esc(S.user.name)}</b>${owner ? 'Owner' : 'Staff'}</div><div class="whobtns"><button class="swbtn" data-act="switchOpen">${SWITCH_ICO}<span>Switch</span></button><button class="outbtn" data-act="logout">${POWER_ICO}<span>Log out</span></button></div></div>
       </nav></div>
       <div class="main">
         <div class="top">
@@ -438,20 +438,42 @@
     const owner = S.user.role === 'owner';
     const on = S.reveal.on;
     const v = (n) => (on ? money(n) : DOTS);
-    const tile = (k, val, sub) => `<div class="stat"><div class="k">${k}</div><div class="v num">${val}</div>${sub ? '<div class="muted small" style="margin-top:4px">' + sub + '</div>' : ''}</div>`;
-    return `<div class="stats">
-        ${owner ? tile("Today's sales", v(d.sales || 0), d.bills + ' bill' + (d.bills === 1 ? '' : 's')) : tile('Bills today', d.bills)}
-        ${tile('Pieces sold today', d.items)}
-        ${owner ? tile('Udhaar owed', v(d.udhaarOwed || 0), 'money customers still owe') : ''}
-        ${tile('Low or out of stock', d.low.length, d.low.length ? 'see the list below' : 'all good')}
+    const hr = new Date().getHours();
+    const hello = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+    const dateTxt = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const tile = (k, val, sub, tone) => `<div class="stat ${tone || ''}"><div class="k">${k}</div><div class="v num">${val}</div>${sub ? '<div class="muted small" style="margin-top:4px">' + sub + '</div>' : ''}</div>`;
+    const week = d.week || [];
+    const peak = Math.max(1, ...week.map((w) => (owner ? w.sales : w.bills)));
+    const dayName = (k) => new Date(k + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short' });
+    const bars = week.map((w, n) => {
+      const val = owner ? w.sales : w.bills;
+      const h = Math.max(4, Math.round((val / peak) * 100));
+      return `<div class="bar ${n === week.length - 1 ? 'now' : ''}" title="${on || !owner ? esc(dayName(w.dateKey)) + ': ' + (owner ? money(w.sales) : w.bills + ' bills') : esc(dayName(w.dateKey))}"><i style="height:${on || !owner ? h : 18}%"></i><span>${esc(dayName(w.dateKey))}</span></div>`;
+    }).join('');
+    const methods = Object.entries(d.byMethod || {}).sort((a, b) => b[1] - a[1]);
+    const mTotal = methods.reduce((n, m) => n + m[1], 0) || 1;
+    const mRows = methods.map(([k, n]) => `<div class="mrow"><span>${esc(k)}</span><div class="mbar"><i style="width:${on ? Math.max(3, Math.round((n / mTotal) * 100)) : 30}%"></i></div><b class="num">${v(n)}</b></div>`).join('') || '<div class="muted small">No sales yet today.</div>';
+    const topMax = Math.max(1, ...(d.top || []).map((t) => t.qty));
+    const topRows = (d.top || []).map((t, n) => `<div class="mrow"><span class="rank">${n + 1}</span><span class="tn">${esc(t.name)}</span><div class="mbar gold"><i style="width:${Math.round((t.qty / topMax) * 100)}%"></i></div><b class="num">${t.qty}</b></div>`).join('') || '<div class="muted small">Sales this week will show up here.</div>';
+    return `<div class="hero"><div><div class="hello">${hello}, ${esc(S.user.name)}</div><div class="muted">${esc(dateTxt)} &middot; ${esc(S.settings.shopName)}</div></div>
+        <div class="row wrap"><button class="btn primary big" data-act="nav" data-view="billing">+ New bill</button>
+        ${owner ? '<button class="btn" data-act="nav" data-view="inventory">Add stock</button><button class="btn" data-act="nav" data-view="udhaar">Udhaar</button>' + eyeBtn() : ''}</div></div>
+      <div class="stats">
+        ${owner ? tile("Today's sales", v(d.sales || 0), d.bills + ' bill' + (d.bills === 1 ? '' : 's'), 'gold') : tile('Bills today', d.bills, '', 'gold')}
+        ${tile('Pieces sold today', d.items, 'items handed over')}
+        ${owner ? tile('Udhaar owed', v(d.udhaarOwed || 0), 'money customers still owe', 'rose') : ''}
+        ${tile('Low or out of stock', d.low.length, d.low.length ? 'see the list below' : 'all good', d.low.length ? 'amber' : 'green')}
       </div>
-      <div class="row wrap" style="margin:14px 0"><button class="btn primary" data-act="nav" data-view="billing">New bill</button>
-        ${owner ? '<button class="btn" data-act="nav" data-view="inventory">Add stock</button><button class="btn" data-act="nav" data-view="udhaar">Udhaar</button>' + eyeBtn() : ''}</div>
+      <div class="trio">
+        <div class="card"><h2>Last 7 days</h2><div class="muted small">${owner ? 'Sales per day' : 'Bills per day'}</div><div class="bars">${bars}</div></div>
+        ${owner ? `<div class="card"><h2>Money received today</h2><div class="muted small">By payment method</div><div class="mlist">${mRows}</div></div>` : ''}
+        <div class="card"><h2>Best sellers this week</h2><div class="muted small">Pieces sold</div><div class="mlist">${topRows}</div></div>
+      </div>
       <div class="split">
         <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Recent bills</th><th>Time</th><th class="right">Total</th></tr></thead><tbody>
           ${d.recent.map((b) => `<tr><td><b>${esc(b.invoice || '')}</b> ${b.status === 'cancelled' ? '<span class="pill off">Cancelled</span>' : ''}</td><td>${esc(when(b.at))}</td><td class="right num">${money(b.total)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">No bills yet.</td></tr>'}</tbody></table></div>
         <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Needs attention</th><th class="right">Left</th></tr></thead><tbody>
-          ${d.low.map((x) => `<tr><td>${esc(x.name)}</td><td class="right">${x.stock === 0 ? '<span class="pill bad">Out</span>' : '<span class="pill warn">' + x.stock + '</span>'}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">Nothing is running low.</td></tr>'}</tbody></table></div>
+          ${d.low.map((x) => `<tr><td>${esc(x.name)}</td><td class="right">${x.stock === 0 ? '<span class="pill bad">Out</span>' : '<span class="pill warn">' + x.stock + '</span>'}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">Everything is in stock.</td></tr>'}</tbody></table></div>
       </div>`;
   }
 
@@ -654,13 +676,34 @@
       if (st === 0) return '<span class="pill bad">Out</span>';
       return `<b class="num">${st}</b>${st <= lowAt ? ' <span class="pill warn">Low</span>' : ''}`;
     };
-    const rows = list.map((s) => {
+    const rowOf = (s, child) => {
       const has = s.cost !== null && s.cost !== undefined;
-      return `<tr><td><b>${esc(s.name)}</b></td><td class="muted">${esc(s.group || '')}</td><td class="right num">${money(s.price)}</td>
+      return `<tr class="${child ? 'subrow' : ''}"><td>${child ? '<span class="subtag">' + esc(s.size) + '</span> ' : ''}<b>${esc(child ? s.name : s.name)}</b></td><td class="muted">${esc(s.group || '')}</td><td class="right num">${money(s.price)}</td>
       ${owner ? `<td class="right num">${has ? shown(s.cost) : noCost}</td><td class="right num">${has ? shown(s.price - s.cost) : noCost}</td>` : ''}
       <td class="right">${stockCell(s)}</td>
       <td>${s.active ? '<span class="pill ok">On</span>' : '<span class="pill off">Off</span>'}</td>
       <td class="right" style="white-space:nowrap">${owner ? `<button class="btn small" data-act="stockIn" data-id="${s.id}">+ Stock</button> <button class="btn small" data-act="editSuit" data-id="${s.id}">Edit</button>` : ''}</td></tr>`;
+    };
+    const seenBase = new Set();
+    const rows = list.map((s) => {
+      if (!(s.base && s.size && SIZED.includes(s.group))) return rowOf(s, false);
+      if (seenBase.has(s.base)) return '';
+      seenBase.add(s.base);
+      const sibs = list.filter((x) => x.base === s.base);
+      const open = !!S.prices.open[s.base] || !!q;
+      const cs = sibs.filter((x) => stockOf(x) !== null);
+      const tot = cs.reduce((n, x) => n + x.stock, 0);
+      const ps = sibs.map((x) => x.price);
+      const lo = Math.min(...ps); const hi = Math.max(...ps);
+      const costs = sibs.map((x) => x.cost);
+      const sameCost = costs.every((c) => c !== null && c !== undefined && c === costs[0]);
+      const stCell = !cs.length ? '<span class="muted small">not counted</span>' : (tot === 0 ? '<span class="pill bad">Out</span>' : `<b class="num">${tot}</b>${cs.some((x) => x.stock <= lowAt) ? ' <span class="pill warn">Low</span>' : ''}`);
+      const head = `<tr class="grouprow"><td><button class="arrow ${open ? 'open' : ''}" data-act="invToggle" data-base="${esc(s.base)}" aria-label="Show sizes">&#9656;</button> <b>${esc(s.base)}</b> <span class="muted small">${sibs.length} sizes</span></td><td class="muted">${esc(s.group || '')}</td>
+        <td class="right num">${lo === hi ? money(lo) : money(lo) + ' - ' + money(hi)}</td>
+        ${owner ? `<td class="right num">${sameCost ? shown(costs[0]) : '<span class="muted small">varies</span>'}</td><td class="right num">${sameCost && lo === hi ? shown(lo - costs[0]) : '<span class="muted small">varies</span>'}</td>` : ''}
+        <td class="right">${stCell}</td><td>${sibs.some((x) => x.active) ? '<span class="pill ok">On</span>' : '<span class="pill off">Off</span>'}</td>
+        <td class="right" style="white-space:nowrap">${owner ? `<button class="btn small" data-act="editAllSizes" data-base="${esc(s.base)}">Edit all sizes</button>` : ''}</td></tr>`;
+      return head + (open ? sibs.map((x) => rowOf(x, true)).join('') : '');
     }).join('');
     const log = owner && S.stock.log.length
       ? `<div class="card" style="margin-top:14px;padding:0;overflow:hidden"><div style="padding:12px 14px 6px"><h2>Recent stock changes</h2></div>
@@ -984,9 +1027,9 @@
     }
     if (m.type === 'sizes') {
       const cats = ['Kurtas', 'Waistcoats'];
-      return `<div class="overlay"><div class="dialog"><h2>Add a kurta or waistcoat</h2><div class="stack">
-        <div><label class="field" for="m-base">Name (for example Kurta Black). Suits and shawls have no size, add them with Add a suit.</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}"></div>
-        <div class="chips">${cats.map((g) => `<button class="chip ${m.group === g ? 'on' : ''}" data-act="sizeCat" data-v="${g}">${g}</button>`).join('')}</div>
+      return `<div class="overlay"><div class="dialog"><h2>${m.edit ? 'Edit all sizes' : 'Add a kurta or waistcoat'}</h2><div class="stack">
+        <div><label class="field" for="m-base">Name (for example Kurta Black). Suits and shawls have no size, add them with Add a suit.</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}" ${m.edit ? 'disabled' : ''}></div>
+        ${m.edit ? '<div class="muted small">The price below is used for every size of this item. A size you leave empty keeps its current stock.</div>' : ''}<div class="chips">${cats.map((g) => `<button class="chip ${m.group === g ? 'on' : ''}" data-act="sizeCat" data-v="${g}">${g}</button>`).join('')}</div>
         <div class="row"><div class="field-wrap"><label class="field" for="m-sp">Selling price (Rs.)</label><input id="m-sp" type="text" inputmode="numeric" data-bind="modal.price" data-kind="digits" value="${esc(m.price)}"></div>
           <div class="field-wrap"><label class="field" for="m-sc">Cost price (Rs.)</label><input id="m-sc" type="text" inputmode="numeric" data-bind="modal.cost" data-kind="digits" value="${esc(m.cost)}" placeholder="Optional"></div></div>
         <div class="muted small">How many pieces of each size are in the shop? Leave a size empty if you do not stock it.</div>
@@ -1270,6 +1313,16 @@
     },
 
     deleteSuitAsk() { const m = S.modal; S.modal = { type: 'deleteSuit', id: m.id, name: m.name, base: m.base || '', all: false, value: '', error: '' }; S.showPw = {}; render(); },
+    invToggle(el) { const b = el.dataset.base; S.prices.open[b] = !S.prices.open[b]; render(); },
+    editAllSizes(el) {
+      const base = el.dataset.base;
+      const sibs = S.prices.all.filter((x) => x.base === base);
+      if (!sibs.length) return;
+      const f = sibs[0];
+      const m = { type: 'sizes', edit: true, base, group: f.group, price: String(f.price), cost: f.cost === null || f.cost === undefined ? '' : String(f.cost), zS: '', zM: '', zL: '', zXL: '', error: '' };
+      for (const x of sibs) m['z' + x.size] = x.stock === null || x.stock === undefined ? '' : String(x.stock);
+      S.modal = m; render();
+    },
     addSizes() { S.modal = { type: 'sizes', base: '', group: 'Kurtas', price: '', cost: '', zS: '', zM: '', zL: '', zXL: '', error: '' }; render(); },
     sizeCat(el) { S.modal.group = el.dataset.v; render(); },
     profitMonth() { S.profit.day = ''; safe(async () => { if (S.reveal.on) await loadProfit(); render(); }); },
