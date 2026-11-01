@@ -1033,7 +1033,7 @@ class Service {
     const paid = this.d.bills.filter((b) => b.status === 'paid');
     const todays = paid.filter((b) => b.dateKey === today);
     const low = this.d.suits.filter((x) => x.active && x.stock !== null && x.stock !== undefined && x.stock <= this.d.settings.lowStockAt)
-      .sort((a, b) => a.stock - b.stock).slice(0, 12).map((x) => ({ id: x.id, name: x.name, stock: x.stock }));
+      .sort((a, b) => a.stock - b.stock).slice(0, 12).map((x) => ({ id: x.id, name: x.name, base: x.base || '', size: x.size || '', stock: x.stock }));
     const recent = this.d.bills.slice(-6).reverse().map((b) => ({ id: b.id, invoice: b.invoice, at: b.createdAt, total: b.total, method: b.method, status: b.status }));
     const days7 = [];
     const base = this.now();

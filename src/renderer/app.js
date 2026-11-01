@@ -441,39 +441,60 @@
     const hr = new Date().getHours();
     const hello = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
     const dateTxt = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const tile = (k, val, sub, tone) => `<div class="stat ${tone || ''}"><div class="k">${k}</div><div class="v num">${val}</div>${sub ? '<div class="muted small" style="margin-top:4px">' + sub + '</div>' : ''}</div>`;
     const week = d.week || [];
-    const peak = Math.max(1, ...week.map((w) => (owner ? w.sales : w.bills)));
+    const val = (w) => (owner ? w.sales : w.bills);
     const dayName = (k) => new Date(k + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short' });
-    const bars = week.map((w, n) => {
-      const val = owner ? w.sales : w.bills;
-      const h = Math.max(4, Math.round((val / peak) * 100));
-      return `<div class="bar ${n === week.length - 1 ? 'now' : ''}" title="${on || !owner ? esc(dayName(w.dateKey)) + ': ' + (owner ? money(w.sales) : w.bills + ' bills') : esc(dayName(w.dateKey))}"><i style="height:${on || !owner ? h : 18}%"></i><span>${esc(dayName(w.dateKey))}</span></div>`;
-    }).join('');
+    // sales line (last 7 days)
+    const W = 640; const H = 150; const peak = Math.max(1, ...week.map(val));
+    const real = on || !owner;
+    const pts = week.map((w, n) => [Math.round((n / Math.max(1, week.length - 1)) * (W - 24)) + 12, real ? Math.round(H - 14 - (val(w) / peak) * (H - 34)) : H / 2]);
+    const line = pts.map((q, n) => (n ? 'L' : 'M') + q[0] + ' ' + q[1]).join(' ');
+    const chart = `<svg class="area" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9a35b" stop-opacity=".45"/><stop offset="1" stop-color="#c9a35b" stop-opacity="0"/></linearGradient></defs>
+      ${real ? `<path d="${line} L${pts[pts.length - 1][0]} ${H} L${pts[0][0]} ${H}Z" fill="url(#ag)"/>` : ''}
+      <path d="${line}" fill="none" stroke="#f3d98e" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" ${real ? '' : 'stroke-dasharray="3 9" opacity=".5"'}/>
+      ${real ? pts.map((q, n) => `<circle cx="${q[0]}" cy="${q[1]}" r="${n === pts.length - 1 ? 6 : 3.5}" fill="${n === pts.length - 1 ? '#f3d98e' : '#18181b'}" stroke="#f3d98e" stroke-width="2"/>`).join('') : ''}</svg>
+      <div class="axis">${week.map((w) => `<span>${esc(dayName(w.dateKey))}</span>`).join('')}</div>`;
+    const yest = week.length > 1 ? week[week.length - 2].sales : 0;
+    let trend = '';
+    if (owner && on) {
+      if (!yest) trend = '<span class="pill ok">First sales to compare</span>';
+      else { const pc = Math.round(((d.sales - yest) / yest) * 100); trend = pc >= 0 ? `<span class="pill ok">&#9650; ${pc}% more than yesterday</span>` : `<span class="pill bad">&#9660; ${-pc}% less than yesterday</span>`; }
+    }
+    // payment donut
+    const COL = ['#6fd39a', '#c9a35b', '#f08a9b', '#7fb2ff', '#b79cf0'];
     const methods = Object.entries(d.byMethod || {}).sort((a, b) => b[1] - a[1]);
-    const mTotal = methods.reduce((n, m) => n + m[1], 0) || 1;
-    const mRows = methods.map(([k, n]) => `<div class="mrow"><span>${esc(k)}</span><div class="mbar"><i style="width:${on ? Math.max(3, Math.round((n / mTotal) * 100)) : 30}%"></i></div><b class="num">${v(n)}</b></div>`).join('') || '<div class="muted small">No sales yet today.</div>';
+    const mTotal = methods.reduce((n, m) => n + m[1], 0);
+    let off = 0;
+    const C = 276.46;
+    const arcs = methods.map(([k, n], i) => { const len = (n / (mTotal || 1)) * C; const a = `<circle cx="60" cy="60" r="44" fill="none" stroke="${COL[i % COL.length]}" stroke-width="16" stroke-dasharray="${Math.max(0, len - 2).toFixed(1)} ${C}" stroke-dashoffset="${(-off).toFixed(1)}" transform="rotate(-90 60 60)"/>`; off += len; return a; }).join('');
+    const legend = methods.map(([k, n], i) => `<div class="lg"><i style="background:${COL[i % COL.length]}"></i><span>${esc(k)}</span><b class="num">${on ? Math.round((n / mTotal) * 100) + '%' : DOTS}</b></div>`).join('') || '<div class="muted small">No sales yet today.</div>';
+    const avg = d.bills ? Math.round((d.sales || 0) / d.bills) : 0;
+    const kpi = (k, x, sub, tone) => `<div class="stat ${tone}"><div class="k">${k}</div><div class="v num">${x}</div><div class="muted small" style="margin-top:4px">${sub}</div></div>`;
     const topMax = Math.max(1, ...(d.top || []).map((t) => t.qty));
     const topRows = (d.top || []).map((t, n) => `<div class="mrow"><span class="rank">${n + 1}</span><span class="tn">${esc(t.name)}</span><div class="mbar gold"><i style="width:${Math.round((t.qty / topMax) * 100)}%"></i></div><b class="num">${t.qty}</b></div>`).join('') || '<div class="muted small">Sales this week will show up here.</div>';
+    const lowRows = d.low.map((x) => `<div class="lrow"><span><b>${esc(x.base || x.name)}</b>${x.size ? '<span class="subtag" style="margin-left:8px">' + esc(x.size) + '</span>' : ''}</span>${x.stock === 0 ? '<span class="pill bad">Out of stock</span>' : '<span class="pill warn">Only ' + x.stock + ' left</span>'}</div>`).join('') || '<div class="allgood">&#10003; Everything is in stock</div>';
     return `<div class="hero"><div><div class="hello">${hello}, ${esc(S.user.name)}</div><div class="muted">${esc(dateTxt)} &middot; ${esc(S.settings.shopName)}</div></div>
-        <div class="row wrap"><button class="btn primary big" data-act="nav" data-view="billing">+ New bill</button>
-        ${owner ? '<button class="btn" data-act="nav" data-view="inventory">Add stock</button><button class="btn" data-act="nav" data-view="udhaar">Udhaar</button>' + eyeBtn() : ''}</div></div>
-      <div class="stats">
-        ${owner ? tile("Today's sales", v(d.sales || 0), d.bills + ' bill' + (d.bills === 1 ? '' : 's'), 'gold') : tile('Bills today', d.bills, '', 'gold')}
-        ${tile('Pieces sold today', d.items, 'items handed over')}
-        ${owner ? tile('Udhaar owed', v(d.udhaarOwed || 0), 'money customers still owe', 'rose') : ''}
-        ${tile('Low or out of stock', d.low.length, d.low.length ? 'see the list below' : 'all good', d.low.length ? 'amber' : 'green')}
+        <div class="row wrap"><button class="btn primary big" data-act="nav" data-view="billing">+ New bill</button></div></div>
+      <div class="dgrid">
+        <div class="card sales"><div class="k">${owner ? "Today's sales" : 'Bills today'}</div>
+          <div class="bigv num">${owner ? v(d.sales || 0) : d.bills}</div>
+          <div class="row wrap" style="gap:10px">${trend}<span class="muted small">${d.bills} bill${d.bills === 1 ? '' : 's'} &middot; ${d.items} piece${d.items === 1 ? '' : 's'} sold</span></div>
+          <div class="chartbox">${chart}</div><div class="muted small">Last 7 days</div></div>
+        ${owner ? `<div class="card"><h2>Paid by</h2><div class="muted small">Money received today</div>
+          <div class="donutbox"><svg viewBox="0 0 120 120" width="150"><circle cx="60" cy="60" r="44" fill="none" stroke="#26262b" stroke-width="16"/>${on ? arcs : ''}<text x="60" y="58" text-anchor="middle" fill="#f3d98e" font-size="13" font-weight="800">${on ? methods.length : ''}</text><text x="60" y="73" text-anchor="middle" fill="#c6c8cf" font-size="8">${on ? 'methods' : 'hidden'}</text></svg></div>
+          <div class="legend">${legend}</div></div>` : `<div class="card"><h2>Best sellers this week</h2><div class="muted small">Pieces sold</div><div class="mlist">${topRows}</div></div>`}
       </div>
-      <div class="trio">
-        <div class="card"><h2>Last 7 days</h2><div class="muted small">${owner ? 'Sales per day' : 'Bills per day'}</div><div class="bars">${bars}</div></div>
-        ${owner ? `<div class="card"><h2>Money received today</h2><div class="muted small">By payment method</div><div class="mlist">${mRows}</div></div>` : ''}
-        <div class="card"><h2>Best sellers this week</h2><div class="muted small">Pieces sold</div><div class="mlist">${topRows}</div></div>
+      <div class="stats" style="margin:14px 0">
+        ${owner ? kpi('Average bill', v(avg), 'per customer today', 'gold') : kpi('Pieces sold', d.items, 'today', 'gold')}
+        ${owner ? kpi('Udhaar owed', v(d.udhaarOwed || 0), 'still to collect', 'rose') : ''}
+        ${kpi('Needs attention', d.low.length, d.low.length ? 'items low or out' : 'all stocked', d.low.length ? 'amber' : 'green')}
+        ${kpi('Bills today', d.bills, 'made so far', 'blue')}
       </div>
-      <div class="split">
-        <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Recent bills</th><th>Time</th><th class="right">Total</th></tr></thead><tbody>
-          ${d.recent.map((b) => `<tr><td><b>${esc(b.invoice || '')}</b> ${b.status === 'cancelled' ? '<span class="pill off">Cancelled</span>' : ''}</td><td>${esc(when(b.at))}</td><td class="right num">${money(b.total)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">No bills yet.</td></tr>'}</tbody></table></div>
-        <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Needs attention</th><th class="right">Left</th></tr></thead><tbody>
-          ${d.low.map((x) => `<tr><td>${esc(x.name)}</td><td class="right">${x.stock === 0 ? '<span class="pill bad">Out</span>' : '<span class="pill warn">' + x.stock + '</span>'}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">Everything is in stock.</td></tr>'}</tbody></table></div>
+      <div class="dgrid3">
+        <div class="card"><h2>Running low</h2><div class="muted small">Order these first</div><div class="llist">${lowRows}</div></div>
+        ${owner ? `<div class="card"><h2>Best sellers this week</h2><div class="muted small">Pieces sold</div><div class="mlist">${topRows}</div></div>` : ''}
+        <div class="card" style="padding:0;overflow:hidden"><div style="padding:18px 18px 6px"><h2>Recent bills</h2></div><table><tbody>
+          ${d.recent.map((b) => `<tr><td><b>${esc(b.invoice || '')}</b> ${b.status === 'cancelled' ? '<span class="pill off">Cancelled</span>' : ''}<div class="muted small">${esc(when(b.at))}</div></td><td class="right num"><b>${money(b.total)}</b></td></tr>`).join('') || '<tr><td class="empty">No bills yet.</td></tr>'}</tbody></table></div>
       </div>`;
   }
 
