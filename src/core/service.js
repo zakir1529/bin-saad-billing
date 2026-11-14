@@ -14,13 +14,13 @@ const PUBLIC_METHODS = [
 ];
 
 const SIZES = ['S', 'M', 'L', 'XL', 'XXL'];
-const CATEGORIES = ['Suits', 'Kurtas', 'Waistcoats', 'Dress Codes', 'Shawls'];
+const CATEGORIES = ['Suits', 'Kurtas', 'Waistcoats', 'Dress Coats', 'Shawls'];
 // The four kinds of things the shop sells. Anything that is not a kurta, waistcoat or shawl is a suit.
 function categoryOf(group) {
   const g = String(group || '').toLowerCase();
   if (g.includes('kurta')) return 'Kurtas';
   if (g.includes('waist')) return 'Waistcoats';
-  if (g.includes('dress')) return 'Dress Codes';
+  if (g.includes('dress')) return 'Dress Coats';
   if (g.includes('shawl')) return 'Shawls';
   return 'Suits';
 }
@@ -524,7 +524,7 @@ class Service {
     const sizes = SIZES.filter((z) => input.sizes && input.sizes[z] !== undefined && input.sizes[z] !== null && input.sizes[z] !== false);
     if (!sizes.length) throw new UserError('Choose at least one size.');
     const group = String(input.group || '').trim().slice(0, 30);
-    if (group && !['Kurtas', 'Waistcoats', 'Dress Codes'].includes(group)) throw new UserError('Sizes are only for kurtas, waistcoats and dress codes. Suits and shawls have no size.');
+    if (group && !['Kurtas', 'Waistcoats', 'Dress Coats'].includes(group)) throw new UserError('Sizes are only for kurtas, waistcoats and dress coats. Suits and shawls have no size.');
     const checked = sizes.map((z) => {
       const v = this._checkSuit({ name: `${base} (${z})`, price: input.price, cost: input.cost, stock: input.sizes[z] === true ? null : input.sizes[z], group });
       return { z, v };

@@ -909,7 +909,7 @@ test('switch account: owner to staff is free, staff to owner needs the password;
   assert.equal(ctx.svc.switchAccount(owner.id, 'owner1234').role, 'owner');
   ctx.svc.saveSuit({ name: 'Grey Shawl', price: 5000, stock: 3, group: 'Shawls' });
   const led = ctx.svc.ledger();
-  assert.deepEqual(led.stock.byCategory.map((c) => c.name), ['Suits', 'Kurtas', 'Waistcoats', 'Dress Codes', 'Shawls']);
+  assert.deepEqual(led.stock.byCategory.map((c) => c.name), ['Suits', 'Kurtas', 'Waistcoats', 'Dress Coats', 'Shawls']);
   assert.equal(led.stock.byCategory.find((c) => c.name === 'Shawls').atPrice, 15000);
   assert.throws(() => ctx.svc.saveSuitSizes({ base: 'Grey Shawl', group: 'Shawls', price: 100, sizes: { M: 1 } }), /no size/);
 });
@@ -1011,7 +1011,7 @@ test('monthly figures: cancelled bills are left out and month = sum of days = da
   assert.equal(d.week.reduce((n, w) => n + w.bills, 0), 2); assert.equal(d.sales, undefined);
 });
 
-test('old JazzCash bills and settings are renamed once, amounts stay the same; XXL and dress codes work', () => {
+test('old JazzCash bills and settings are renamed once, amounts stay the same; XXL and dress coats work', () => {
   const ctx = setup();
   ctx.svc.store.data.settings.paymentMethods = ['Cash', 'JazzCash', 'Bank'];
   ctx.svc.store.data.migrations = {};
@@ -1021,7 +1021,7 @@ test('old JazzCash bills and settings are renamed once, amounts stay the same; X
   ctx.svc.store.reload();
   assert.equal(ctx.svc.store.data.settings.paymentMethods.join('|'), 'Cash|JazzCash / Easypaisa|Bank');
   assert.equal(ctx.svc.store.data.bills.find((x) => x.id === b.id).method, 'JazzCash / Easypaisa');
-  ctx.svc.saveSuitSizes({ base: 'Dress Code Navy', group: 'Dress Codes', price: 5000, cost: 3000, sizes: { S: 2, M: 3, XXL: 4 } });
-  const names = ctx.svc.listSuits().filter((x) => x.base === 'Dress Code Navy').map((x) => x.size);
+  ctx.svc.saveSuitSizes({ base: 'Dress Coat Navy', group: 'Dress Coats', price: 5000, cost: 3000, sizes: { S: 2, M: 3, XXL: 4 } });
+  const names = ctx.svc.listSuits().filter((x) => x.base === 'Dress Coat Navy').map((x) => x.size);
   assert.deepEqual(names, ['S', 'M', 'XXL']);
 });

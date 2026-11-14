@@ -91,7 +91,8 @@ class Store {
   // JazzCash and Easypaisa are one payment method now. Done once; old bills keep every rupee, only the label changes.
   _renameJazz() {
     const d = this.data;
-    if (d.migrations && d.migrations.jazzEasy) return;
+    if (d.migrations && d.migrations.jazzEasy && d.migrations.dressCoat) return;
+    d.migrations = { ...(d.migrations || {}), dressCoat: true };
     const NEW = 'JazzCash / Easypaisa';
     const fix = (m) => (/^(jazzcash|easypaisa|easy ?paisa)$/i.test(String(m || '').trim()) ? NEW : m);
     const methods = [...new Set((d.settings.paymentMethods || []).map(fix))];
@@ -99,6 +100,7 @@ class Store {
     for (const b of d.bills || []) { b.method = fix(b.method); }
     for (const p of d.payments || []) { p.method = fix(p.method); }
     d.migrations = { ...(d.migrations || {}), jazzEasy: true };
+    for (const x of d.suits || []) { if (x.group === 'Dress Codes') x.group = 'Dress Coats'; if (typeof x.name === 'string') x.name = x.name.replace(/^Dress Code\b/, 'Dress Coat'); if (typeof x.base === 'string') x.base = x.base.replace(/^Dress Code\b/, 'Dress Coat'); }
   }
 
   save() {

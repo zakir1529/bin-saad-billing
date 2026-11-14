@@ -394,7 +394,7 @@
 
   const TITLES = { dashboard: 'Dashboard', ledger: 'Ledger', billing: 'Checkout', inventory: 'Inventory', bills: 'Bills', udhaar: 'Udhaar', profit: 'Analytics', sales: 'Sales', settings: 'Settings' };
 
-  const SIZED = ['Kurtas', 'Waistcoats', 'Dress Codes'];
+  const SIZED = ['Kurtas', 'Waistcoats', 'Dress Coats'];
   const svgI = (d) => `<svg class="ico" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const POWER_ICO = svgI('<path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/>');
   const SWITCH_ICO = svgI('<path d="M4 8h14l-3-3"/><path d="M20 16H6l3 3"/>');
@@ -445,7 +445,7 @@
     const peak = Math.max(1, ...week.map((w) => w.bills));
     const bars = week.map((w, n) => `<div class="bar ${n === week.length - 1 ? 'now' : ''}" title="${esc(dayName(w.dateKey))}: ${w.bills} bills"><b class="bn">${w.bills || ''}</b><i style="height:${Math.max(5, Math.round((w.bills / peak) * 100))}%"></i><span>${esc(dayName(w.dateKey))}</span></div>`).join('');
     const catTotal = (d.categories || []).reduce((n, c) => n + c.qty, 0) || 1;
-    const CC = { Suits: '#c9a35b', Kurtas: '#6fd39a', Waistcoats: '#f0b35a', 'Dress Codes': '#7fb2ff', Shawls: '#b79cf0' };
+    const CC = { Suits: '#c9a35b', Kurtas: '#6fd39a', Waistcoats: '#f0b35a', 'Dress Coats': '#7fb2ff', Shawls: '#b79cf0' };
     const catRows = (d.categories || []).map((c) => `<div class="crow"><span class="cn">${esc(c.name)}</span><div class="cbar"><i style="width:${Math.max(4, Math.round((c.qty / catTotal) * 100))}%;background:${CC[c.name] || '#7fb2ff'}"></i></div><b class="num">${Math.round((c.qty / catTotal) * 100)}%</b></div>`).join('') || '<div class="muted small">Sales this week will show up here.</div>';
     const topMax = Math.max(1, ...(d.top || []).map((t) => t.qty));
     const topRows = (d.top || []).map((t, n) => `<div class="mrow"><span class="rank">${n + 1}</span><span class="tn">${esc(t.name)}</span><div class="mbar gold"><i style="width:${Math.round((t.qty / topMax) * 100)}%"></i></div><b class="num">${t.qty}</b></div>`).join('') || '<div class="muted small">Nothing sold yet this week.</div>';
@@ -1029,9 +1029,9 @@
         <div class="row"><button class="btn grow" data-act="modalCancel">Close</button></div></div></div></div>`;
     }
     if (m.type === 'sizes') {
-      const cats = ['Kurtas', 'Waistcoats', 'Dress Codes'];
+      const cats = ['Kurtas', 'Waistcoats', 'Dress Coats'];
       return `<div class="overlay"><div class="dialog"><h2>${m.edit ? 'Edit all sizes' : 'Add with sizes'}</h2><div class="stack">
-        <div><label class="field" for="m-base">Name (for example Kurta Black or Dress Code Navy). Suits and shawls have no size, add them with Add a suit.</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}" ${m.edit ? 'disabled' : ''}></div>
+        <div><label class="field" for="m-base">Name (for example Kurta Black or Dress Coat Navy). Suits and shawls have no size, add them with Add a suit.</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}" ${m.edit ? 'disabled' : ''}></div>
         ${m.edit ? '<div class="muted small">The price below is used for every size of this item. A size you leave empty keeps its current stock.</div>' : ''}<div class="chips">${cats.map((g) => `<button class="chip ${m.group === g ? 'on' : ''}" data-act="sizeCat" data-v="${g}">${g}</button>`).join('')}</div>
         <div class="row"><div class="field-wrap"><label class="field" for="m-sp">Selling price (Rs.)</label><input id="m-sp" type="text" inputmode="numeric" data-bind="modal.price" data-kind="digits" value="${esc(m.price)}"></div>
           <div class="field-wrap"><label class="field" for="m-sc">Cost price (Rs.)</label><input id="m-sc" type="${S.reveal.on ? 'text' : 'password'}" autocomplete="off" inputmode="numeric" data-bind="modal.cost" data-kind="digits" value="${esc(m.cost)}" placeholder="Optional"></div></div>
