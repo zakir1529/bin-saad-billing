@@ -98,7 +98,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.click('[data-act=group][data-v="Printed"]');
   check('group tab filters the tiles (only Rose has the Printed group)', (await page.locator('.tile').count()) === 1);
   await page.click('[data-act=group][data-v="All"]');
-  await page.click('[data-act=method][data-v="JazzCash"]');
+  await page.click('[data-act=method][data-v="JazzCash / Easypaisa"]');
   check('wallet: no received box, save enabled', (await page.locator('#received').count()) === 0 && !(await page.locator('[data-act=save][data-print=""]').isDisabled()));
   await page.fill('#cname', 'Imran Khan'); await page.fill('#cphone', '0300-1234567');
   await page.click('[data-act=save][data-print=""]');
@@ -168,7 +168,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   const shownTxt = await text('.content');
   // bill 1 (10,800) was cancelled; bill 2 JazzCash 4,200 (Maroon) + bill 3 cash 4,800 (Rose) remain -> 9,000 across 2 bills
   check('sales show 9,000 over 2 bills (cancelled bill left out)', shownTxt.includes('Rs. 9,000') && /Bills 2/.test(shownTxt), shownTxt.slice(0, 400));
-  check('by-method split shows JazzCash 4,200 and Cash 4,800', shownTxt.includes('JazzCash Rs. 4,200') && shownTxt.includes('Cash Rs. 4,800'), shownTxt);
+  check('by-method split shows JazzCash / Easypaisa 4,200 and Cash 4,800', shownTxt.includes('JazzCash / Easypaisa Rs. 4,200') && shownTxt.includes('Cash Rs. 4,800'), shownTxt);
   check('cancelled count is 1', /Cancelled bills 1/.test(shownTxt));
   check("top bar today's sales shows 9,000", (await text('.top')).includes('Rs. 9,000'));
   await shot('10-sales-revealed');
@@ -247,7 +247,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.waitForTimeout(200);
   check('udhaar: cannot receive more than is owed', (await text('.toast')).includes('owes only Rs. 7,200'), await text('.toast'));
   await page.fill('#u-amt', '200');
-  await page.click('[data-act=payMethod][data-v="JazzCash"]');
+  await page.click('[data-act=payMethod][data-v="JazzCash / Easypaisa"]');
   await page.click('[data-act=receiveUdhaar]');
   await page.waitForFunction(() => document.querySelector('.toast') && document.querySelector('.toast').innerText.includes('Still owes'));
   check('udhaar: Rs. 200 received, Rs. 7,000 still owed', (await text('.toast')).includes('Rs. 7,000'), await text('.toast'));
@@ -340,7 +340,10 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   check('analytics can show a single day', (await text('.content')).includes('One day'), (await text('.content')).slice(0, 200));
   await shot('24-analytics-day');
   await nav('settings');
-  check('settings has delete-by-date and the lock', (await text('.content')).includes('Delete test bills before a date') && (await text('.content')).includes('Start real sales'), '');
+  check('settings no longer has the delete-test-bills or start-real-sales buttons', !(await text('.content')).includes('Delete test bills') && !(await text('.content')).includes('Start real sales') && !(await text('.content')).includes('Clear all test data'), '');
+  check('settings has a Program updates card with a check button', (await text('.content')).includes('Program updates') && (await page.locator('[data-act=checkUpdate]').count()) === 1, '');
+  await page.click('[data-act=checkUpdate]'); await page.waitForTimeout(400);
+  check('checking for updates says you have the newest version', (await text('.content')).includes('newest version'), '');
   check('settings has an Email card with the owner address box', (await text('.content')).includes('Owner email') && (await page.locator('#e-to').count()) === 1, '');
   await page.fill('#e-to', 'owner@example.com'); await page.fill('#e-from', 'shop@example.com'); await page.fill('#e-pw', 'wrong');
   await page.click('[data-act=saveMail]'); await page.waitForTimeout(400);
@@ -348,9 +351,6 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await page.fill('#e-pw', 'owner1234'); await page.click('[data-act=saveMail]'); await page.waitForTimeout(500);
   check('email settings save with the right password', (await text('.toast')).includes('Email settings saved'), await text('.toast'));
   await shot('25-email-card');
-  await page.click('[data-act=goLiveAsk]');
-  await page.fill('#m-cpw', 'owner1234'); await page.click('[data-act=modalOk]'); await page.waitForTimeout(400);
-  check('after Start real sales the clear buttons are gone', !(await text('.content')).includes('Clear all test data') && (await text('.content')).includes('switched off'), (await text('.toast')));
 
   // switch account
   await page.click('[data-act=switchOpen]');

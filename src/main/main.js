@@ -66,24 +66,30 @@ function start() {
 
 // Checks GitHub for a newer version, downloads it quietly, then asks before installing.
 // Never touches the data file. Does nothing when run from source or offline.
+let updater = null;
+const upd = { status: 'idle', version: '', percent: 0 };
 function setupAutoUpdate() {
-  if (!app.isPackaged) return;
-  let autoUpdater;
-  try { ({ autoUpdater } = require('electron-updater')); } catch (e) { logLine('updater missing: ' + e.message); return; }
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.logger = null;
-  autoUpdater.on('error', (e) => logLine('update check: ' + (e && e.message)));
-  autoUpdater.on('update-downloaded', async (info) => {
+  if (!app.isPackaged) { upd.status = 'dev'; return; }
+  try { ({ autoUpdater: updater } = require('electron-updater')); } catch (e) { logLine('updater missing: ' + e.message); return; }
+  updater.autoDownload = true;
+  updater.autoInstallOnAppQuit = true;
+  updater.logger = null;
+  updater.on('checking-for-update', () => { if (upd.status !== 'ready') upd.status = 'checking'; });
+  updater.on('update-available', (i) => { upd.status = 'downloading'; upd.version = i.version; upd.percent = 0; });
+  updater.on('download-progress', (p) => { upd.status = 'downloading'; upd.percent = Math.round(p.percent || 0); });
+  updater.on('update-not-available', () => { if (upd.status !== 'ready') upd.status = 'none'; });
+  updater.on('error', (e) => { logLine('update check: ' + (e && e.message)); if (upd.status !== 'ready') upd.status = 'error'; });
+  updater.on('update-downloaded', async (info) => {
+    upd.status = 'ready'; upd.version = info.version;
     const w = BrowserWindow.getAllWindows()[0];
     const r = await dialog.showMessageBox(w || undefined, {
       type: 'info', buttons: ['Install now', 'Later'], defaultId: 0, cancelId: 1,
       title: 'Update ready', message: 'A new version of Bin Saad Billing is ready.',
       detail: 'Your bills and data are not touched. Choose Later to install it when you close the program.',
     });
-    if (r.response === 0) { runBackup(); autoUpdater.quitAndInstall(); }
+    if (r.response === 0) { runBackup(); updater.quitAndInstall(); }
   });
-  const check = () => { autoUpdater.checkForUpdates().catch((e) => logLine('update check: ' + (e && e.message))); };
+  const check = () => { updater.checkForUpdates().catch((e) => logLine('update check: ' + (e && e.message))); };
   setTimeout(check, 30000);
   setInterval(check, 4 * 3600000);
 }
@@ -436,6 +442,24 @@ const EXTRA = {
     runBackup();
     if (!lastBackup.ok) throw new UserError(lastBackup.error || 'Backup failed.');
     return lastBackup;
+  },
+
+  updateStatus() {
+    service._requireUser();
+    return { ...upd };
+  },
+  async checkUpdate() {
+    service._requireUser();
+    if (!updater) return { ...upd, status: upd.status === 'dev' ? 'dev' : 'error' };
+    try { await updater.checkForUpdates(); } catch (e) { upd.status = 'error'; }
+    return { ...upd };
+  },
+  installUpdate() {
+    service._requireOwner();
+    if (!updater || upd.status !== 'ready') throw new Error('No update is ready yet.');
+    runBackup();
+    updater.quitAndInstall();
+    return true;
   },
 
   appInfo() {

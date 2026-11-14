@@ -189,9 +189,9 @@ test('payment rules: cash must cover the total, wallets must match it exactly', 
   assert.throws(() => ctx.svc.createBill(bill(ctx, { received: 3999 })), /less than the total/);
   assert.throws(() => ctx.svc.createBill(bill(ctx, { received: '' })), /Enter the amount received/);
   assert.throws(() => ctx.svc.createBill(bill(ctx, { received: 4000.5 })), /whole number/);
-  assert.throws(() => ctx.svc.createBill(bill(ctx, { method: 'JazzCash', received: 4500 })), /must equal the total/);
+  assert.throws(() => ctx.svc.createBill(bill(ctx, { method: 'JazzCash / Easypaisa', received: 4500 })), /must equal the total/);
   assert.throws(() => ctx.svc.createBill(bill(ctx, { method: 'Cheque' })), /how the customer is paying/);
-  const ok = ctx.svc.createBill(bill(ctx, { method: 'JazzCash', received: '' })).bill;
+  const ok = ctx.svc.createBill(bill(ctx, { method: 'JazzCash / Easypaisa', received: '' })).bill;
   assert.deepEqual([ok.received, ok.change], [4000, 0]);
   assert.equal(ctx.store.data.bills.length, 1); // refused bills were never saved
   assert.equal(ctx.store.data.counters.billNo, 1);
@@ -398,7 +398,7 @@ test('receipt escapes names so odd characters cannot break the page', () => {
 
 test('wallet payments show no change lines; cash shows received and change', () => {
   const ctx = setup();
-  const w = ctx.svc.createBill(bill(ctx, { method: 'JazzCash', received: '' })).bill;
+  const w = ctx.svc.createBill(bill(ctx, { method: 'JazzCash / Easypaisa', received: '' })).bill;
   const c = ctx.svc.createBill(bill(ctx, { received: 5000 })).bill;
   assert.ok(!buildReceiptHtml(w, ctx.svc.getSettings()).includes('Change'));
   assert.ok(buildReceiptHtml(c, ctx.svc.getSettings()).includes('Change'));
@@ -570,9 +570,9 @@ test('payment received later shows in the day report as money received but not a
   ctx.svc.createBill(credit(ctx)); // sales 4000, cash 1000 now
   ctx.clock.t = new Date(2026, 9, 27, 11, 0, 0);
   const key = ctx.svc.listUdhaar().customers[0].key;
-  ctx.svc.receiveUdhaar({ uid: 'pay-day-0002', customerKey: key, amount: 700, method: 'JazzCash' });
+  ctx.svc.receiveUdhaar({ uid: 'pay-day-0002', customerKey: key, amount: 700, method: 'JazzCash / Easypaisa' });
   const d = ctx.svc.dailyReport();
-  assert.deepEqual([d.sales, d.udhaarCollected, d.byMethod.JazzCash], [0, 700, 700]);
+  assert.deepEqual([d.sales, d.udhaarCollected, d.byMethod['JazzCash / Easypaisa']], [0, 700, 700]);
   const y = ctx.svc.dailyReport('2026-10-26');
   assert.deepEqual([y.sales, y.udhaarGiven, y.byMethod.Cash], [4000, 3000, 1000]);
 });
@@ -812,11 +812,11 @@ const { buildDayReportHtml } = require('../src/core/report');
 test('day report lists bills, totals, money by method and udhaar, and crosses out cancelled bills', () => {
   const ctx = setup();
   ctx.svc.createBill(bill(ctx, { discount: { type: 'pct', value: 10 }, received: 3600 }));
-  const gone = ctx.svc.createBill(bill(ctx, { method: 'JazzCash', received: '' })).bill;
+  const gone = ctx.svc.createBill(bill(ctx, { method: 'JazzCash / Easypaisa', received: '' })).bill;
   ctx.svc.cancelBill(gone.id, 'wrong bill');
   ctx.svc.createBill(credit(ctx)); // 4000 bill, 1000 paid now
   const key = ctx.svc.listUdhaar().customers[0].key;
-  ctx.svc.receiveUdhaar({ uid: 'pay-rep-0005', customerKey: key, amount: 500, method: 'Easypaisa' });
+  ctx.svc.receiveUdhaar({ uid: 'pay-rep-0005', customerKey: key, amount: 500, method: 'JazzCash / Easypaisa' });
   const report = ctx.svc.dailyReport();
   const html = buildDayReportHtml(report, ctx.svc.searchBills({ from: report.dateKey, to: report.dateKey }), ctx.svc.getSettings());
   assert.ok(html.includes('BIN SAAD FABRICS') && html.includes('26-10-2026'));
@@ -909,7 +909,7 @@ test('switch account: owner to staff is free, staff to owner needs the password;
   assert.equal(ctx.svc.switchAccount(owner.id, 'owner1234').role, 'owner');
   ctx.svc.saveSuit({ name: 'Grey Shawl', price: 5000, stock: 3, group: 'Shawls' });
   const led = ctx.svc.ledger();
-  assert.deepEqual(led.stock.byCategory.map((c) => c.name), ['Suits', 'Kurtas', 'Waistcoats', 'Shawls']);
+  assert.deepEqual(led.stock.byCategory.map((c) => c.name), ['Suits', 'Kurtas', 'Waistcoats', 'Dress Codes', 'Shawls']);
   assert.equal(led.stock.byCategory.find((c) => c.name === 'Shawls').atPrice, 15000);
   assert.throws(() => ctx.svc.saveSuitSizes({ base: 'Grey Shawl', group: 'Shawls', price: 100, sizes: { M: 1 } }), /no size/);
 });
@@ -1009,4 +1009,19 @@ test('monthly figures: cancelled bills are left out and month = sum of days = da
   assert.equal(ctx.svc.profitReport('2026-10-29').sales, 3000);
   const d = ctx.svc.dashboard();
   assert.equal(d.week.reduce((n, w) => n + w.bills, 0), 2); assert.equal(d.sales, undefined);
+});
+
+test('old JazzCash bills and settings are renamed once, amounts stay the same; XXL and dress codes work', () => {
+  const ctx = setup();
+  ctx.svc.store.data.settings.paymentMethods = ['Cash', 'JazzCash', 'Bank'];
+  ctx.svc.store.data.migrations = {};
+  const b = ctx.svc.createBill(bill(ctx, { method: 'Cash', received: 99999 })).bill;
+  ctx.svc.store.data.bills.find((x) => x.id === b.id).method = 'JazzCash';
+  ctx.svc.store.save();
+  ctx.svc.store.reload();
+  assert.equal(ctx.svc.store.data.settings.paymentMethods.join('|'), 'Cash|JazzCash / Easypaisa|Bank');
+  assert.equal(ctx.svc.store.data.bills.find((x) => x.id === b.id).method, 'JazzCash / Easypaisa');
+  ctx.svc.saveSuitSizes({ base: 'Dress Code Navy', group: 'Dress Codes', price: 5000, cost: 3000, sizes: { S: 2, M: 3, XXL: 4 } });
+  const names = ctx.svc.listSuits().filter((x) => x.base === 'Dress Code Navy').map((x) => x.size);
+  assert.deepEqual(names, ['S', 'M', 'XXL']);
 });

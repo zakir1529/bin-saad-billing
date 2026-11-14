@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS = {
   paperWidthMm: 80,
   printerName: '', // empty = the Windows default printer
   silentPrint: true,
-  paymentMethods: ['Cash', 'JazzCash', 'Easypaisa', 'Bank'],
+  paymentMethods: ['Cash', 'JazzCash / Easypaisa', 'Bank'],
   discountLimitPct: 15, // staff cannot give more than this; the owner can
   revealNeedsPassword: true,
   backupDir: '',
@@ -84,7 +84,21 @@ class Store {
     } else {
       this.data = base;
     }
+    this._renameJazz();
     if (this.data.settings.lowStockAt === 3) this.data.settings.lowStockAt = 7; // the old default; 7 or fewer now shows as Low
+  }
+
+  // JazzCash and Easypaisa are one payment method now. Done once; old bills keep every rupee, only the label changes.
+  _renameJazz() {
+    const d = this.data;
+    if (d.migrations && d.migrations.jazzEasy) return;
+    const NEW = 'JazzCash / Easypaisa';
+    const fix = (m) => (/^(jazzcash|easypaisa|easy ?paisa)$/i.test(String(m || '').trim()) ? NEW : m);
+    const methods = [...new Set((d.settings.paymentMethods || []).map(fix))];
+    d.settings.paymentMethods = methods.length ? methods : ['Cash', NEW, 'Bank'];
+    for (const b of d.bills || []) { b.method = fix(b.method); }
+    for (const p of d.payments || []) { p.method = fix(p.method); }
+    d.migrations = { ...(d.migrations || {}), jazzEasy: true };
   }
 
   save() {

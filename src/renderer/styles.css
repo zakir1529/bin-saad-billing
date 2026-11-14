@@ -390,3 +390,20 @@ input, select, textarea, button { font-weight: 600; }
 .cbar i { display: block; height: 100%; border-radius: 6px; }
 .crow b { min-width: 44px; text-align: right; }
 .hero > .btn { flex: none; width: auto; min-width: 190px; align-self: center; }
+
+/* ---- update chip ---- */
+.upd-chip { border: 1px solid #8a6d2f; background: linear-gradient(135deg, #f6dc92, #c9a35b); color: #1a1406; font-weight: 800; border-radius: 20px; padding: 7px 16px; cursor: pointer; animation: glow 1.8s ease-in-out infinite; }
+.upd-chip.busy { background: #2a2412; color: #f0c76a; animation: none; cursor: default; }
+@keyframes glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(201, 163, 91, .55); } 50% { box-shadow: 0 0 0 8px rgba(201, 163, 91, 0); } }
+
+/* ---- bills (invoices) premium ---- */
+.inv { color: #f3d98e; letter-spacing: .5px; font-size: 15px; }
+.mpill { display: inline-block; padding: 3px 12px; border-radius: 12px; font-weight: 700; font-size: 12.5px; background: #12301f; color: #6fd39a; border: 1px solid #1f5a39; white-space: nowrap; }
+tr.click { transition: background .12s ease; }
+tr.click:hover td { background: #1d1b14; }
+tr.click.sel td { background: #2a2412; }
+tr.click.sel td:first-child { box-shadow: inset 4px 0 0 #c9a35b; }
+.billcard { border: 1px solid #4a3d1f; background: linear-gradient(160deg, #211b0e 0%, #17171a 45%); box-shadow: 0 12px 34px rgba(0, 0, 0, .4); position: relative; overflow: hidden; }
+.billcard::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: linear-gradient(90deg, #f6dc92, #c9a35b, #7a5a1e); }
+.billcard h2 { color: #f3d98e; font-size: 19px; }
+.billcard .sum:last-of-type { border-top: 1px dashed #5a4a22; padding-top: 10px; margin-top: 6px; color: #f3d98e; }

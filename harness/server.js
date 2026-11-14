@@ -45,6 +45,9 @@ const EXTRA = {
     lastReport = buildRangeReportHtml(service.rangeReport(from, to), service.searchBills({ from, to, limit: 5000 }), settings());
     return { file: 'C:\\Users\\Shop\\Documents\\Bin Saad Reports\\Sales-' + from + '_to_' + to + '.pdf' };
   },
+  updateStatus() { return { status: 'idle', version: '', percent: 0 }; },
+  checkUpdate() { return { status: 'none', version: '', percent: 0 }; },
+  installUpdate() { return true; },
   testPrint() { printed.push({ id: 0, no: 0, html: 'test' }); return { printed: true }; },
   testReceiptHtml() { return buildReceiptHtml(sampleBill(), settings(), { test: true }); },
   listPrinters() { return [{ name: 'POS-80', displayName: 'POS-80 Thermal Printer', isDefault: true }, { name: 'Office', displayName: 'Office Laser', isDefault: false }]; },

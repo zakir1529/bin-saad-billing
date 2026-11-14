@@ -116,6 +116,7 @@
 
   async function refreshInfo() {
     try { S.info = await call('appInfo'); } catch (e) { S.info = null; }
+    await pollUpdate();
     render();
   }
   setInterval(() => { if (S.user) refreshInfo(); }, 30000);
@@ -393,7 +394,7 @@
 
   const TITLES = { dashboard: 'Dashboard', ledger: 'Ledger', billing: 'Checkout', inventory: 'Inventory', bills: 'Bills', udhaar: 'Udhaar', profit: 'Analytics', sales: 'Sales', settings: 'Settings' };
 
-  const SIZED = ['Kurtas', 'Waistcoats'];
+  const SIZED = ['Kurtas', 'Waistcoats', 'Dress Codes'];
   const svgI = (d) => `<svg class="ico" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const POWER_ICO = svgI('<path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/>');
   const SWITCH_ICO = svgI('<path d="M4 8h14l-3-3"/><path d="M20 16H6l3 3"/>');
@@ -424,7 +425,7 @@
       <div class="main">
         <div class="top">
           <h1>${TITLES[S.view]}</h1><div class="grow"></div>
-          ${backupWarn ? '<span class="warn-chip" title="' + esc(S.info.lastBackup.error) + '">Backup problem: check the USB drive</span>' : ''}
+          ${S.upd && S.upd.status === 'ready' ? '<button class="upd-chip" data-act="installUpdate" title="Install the new version now">&#11014; Update ready: click to install</button>' : (S.upd && S.upd.status === 'downloading' ? '<span class="upd-chip busy">Downloading update ' + (S.upd.percent || 0) + '%</span>' : '')}
           ${owner ? `<div class="chip-eye">Today's sales <strong class="num">${S.reveal.on && S.reveal.today ? money(S.reveal.today.sales) : DOTS}</strong>${eyeBtn()}</div>` : ''}
         </div>
         <div class="content" ${S.view === 'billing' ? 'style="overflow:hidden"' : ''}>${content}</div>
@@ -444,7 +445,7 @@
     const peak = Math.max(1, ...week.map((w) => w.bills));
     const bars = week.map((w, n) => `<div class="bar ${n === week.length - 1 ? 'now' : ''}" title="${esc(dayName(w.dateKey))}: ${w.bills} bills"><b class="bn">${w.bills || ''}</b><i style="height:${Math.max(5, Math.round((w.bills / peak) * 100))}%"></i><span>${esc(dayName(w.dateKey))}</span></div>`).join('');
     const catTotal = (d.categories || []).reduce((n, c) => n + c.qty, 0) || 1;
-    const CC = { Suits: '#c9a35b', Kurtas: '#6fd39a', Waistcoats: '#f0b35a', Shawls: '#b79cf0' };
+    const CC = { Suits: '#c9a35b', Kurtas: '#6fd39a', Waistcoats: '#f0b35a', 'Dress Codes': '#7fb2ff', Shawls: '#b79cf0' };
     const catRows = (d.categories || []).map((c) => `<div class="crow"><span class="cn">${esc(c.name)}</span><div class="cbar"><i style="width:${Math.max(4, Math.round((c.qty / catTotal) * 100))}%;background:${CC[c.name] || '#7fb2ff'}"></i></div><b class="num">${Math.round((c.qty / catTotal) * 100)}%</b></div>`).join('') || '<div class="muted small">Sales this week will show up here.</div>';
     const topMax = Math.max(1, ...(d.top || []).map((t) => t.qty));
     const topRows = (d.top || []).map((t, n) => `<div class="mrow"><span class="rank">${n + 1}</span><span class="tn">${esc(t.name)}</span><div class="mbar gold"><i style="width:${Math.round((t.qty / topMax) * 100)}%"></i></div><b class="num">${t.qty}</b></div>`).join('') || '<div class="muted small">Nothing sold yet this week.</div>';
@@ -514,7 +515,7 @@
           const prices = sibs.map((x) => x.price);
           const lo = Math.min(...prices); const hi = Math.max(...prices);
           const q = sibs.reduce((n, x) => n + (inBill.get(x.id) || 0), 0);
-          const order = ['S', 'M', 'L', 'XL'];
+          const order = ['S', 'M', 'L', 'XL', 'XXL'];
           const sorted = sibs.slice().sort((x, y) => order.indexOf(x.size) - order.indexOf(y.size));
           let cur = sorted.find((x) => x.id === S.sizeSel[s.base]) || sorted.find((x) => stockOf(x) !== 0) || sorted[0];
           const cst = stockOf(cur);
@@ -601,12 +602,19 @@
   }
 
   // ----- bills -----
+  function updLine() {
+    const u = S.upd || { status: 'idle' };
+    const t = { idle: 'Not checked yet in this session.', checking: 'Checking for a new version...', downloading: 'Downloading version ' + esc(u.version || '') + ' (' + (u.percent || 0) + '%)...', ready: 'Version ' + esc(u.version || '') + ' is ready to install. Your data is not touched.', none: 'You have the newest version.', error: 'Could not check right now (is the internet on?).', dev: 'Updates work in the installed program only.' }[u.status] || '';
+    return '<div class="' + (u.status === 'ready' ? 'pill ok' : 'muted') + '" style="align-self:flex-start">' + t + '</div>';
+  }
+  async function pollUpdate() { try { S.upd = await call('updateStatus'); } catch (e) { /* ignore */ } }
+
   function viewBills() {
     const f = S.bills;
     const rows = (f.list || []).map((b) => `<tr class="click ${f.sel === b.id ? 'sel' : ''}" data-act="pickBill" data-id="${b.id}">
-      <td class="num"><b>${esc(b.invoice || pad4(b.no))}</b></td><td class="num">${when(b.createdAt)}</td>
+      <td class="num"><b class="inv">${esc(b.invoice || pad4(b.no))}</b></td><td class="num">${when(b.createdAt)}</td>
       <td>${esc(b.customerName || '')} <span class="muted small">${esc(b.customerPhone || '')}</span></td>
-      <td class="right num"><b>${money(b.total)}</b></td><td>${esc(b.method)}</td>
+      <td class="right num"><b>${money(b.total)}</b></td><td><span class="mpill">${esc(b.method)}</span></td>
       <td>${b.status === 'cancelled' ? '<span class="pill bad">Cancelled</span>' : ''}${b.status !== 'cancelled' && b.due > 0 ? '<span class="pill off">Udhaar</span>' : ''}</td></tr>`).join('');
     const sel = f.sel && (f.list || []).find((b) => b.id === f.sel);
     return `<div class="split">
@@ -628,7 +636,7 @@
 
   function billDetail(b) {
     const owner = S.user.role === 'owner';
-    return `<div class="card">
+    return `<div class="card billcard">
       <div class="row between"><h2>Bill ${esc(b.invoice || pad4(b.no))}</h2>${b.status === 'cancelled' ? '<span class="pill bad">Cancelled</span>' : '<span class="pill ok">Paid</span>'}</div>
       <div class="muted small" style="margin:4px 0 10px">${when(b.createdAt)} &middot; ${esc(b.cashier)}${b.customerName ? ' &middot; ' + esc(b.customerName) : ''}${b.customerPhone ? ' ' + esc(b.customerPhone) : ''}</div>
       <table>${b.lines.map((l) => `<tr><td>${esc(l.name)}<div class="muted small">${l.qty} x ${money(l.price)}</div></td><td class="right num">${money(l.amount)}</td></tr>`).join('')}</table>
@@ -712,7 +720,7 @@
       </div>
       <div class="card row wrap" style="margin-bottom:12px">
         <div class="field-wrap" style="min-width:240px"><label class="field" for="pq">Search the suits</label><input id="pq" type="text" data-bind="prices.q" data-rerender="1" value="${esc(S.prices.q)}" placeholder="Suit name or group"></div>
-        ${owner ? '<div style="align-self:flex-end" class="row wrap"><button class="btn primary" data-act="addSuit">Add a suit</button><button class="btn primary" data-act="addSizes">Add Kurta / Waistcoat</button><button class="btn" data-act="pasteList">Paste a list</button><button class="btn" data-act="pasteStock">Paste stock counts</button>' + eyeBtn() + '</div>' : '<div class="muted small" style="align-self:flex-end">Only the owner can change prices and stock.</div>'}
+        ${owner ? '<div style="align-self:flex-end" class="row wrap"><button class="btn primary" data-act="addSuit">Add a suit</button><button class="btn primary" data-act="addSizes">Add with sizes</button><button class="btn" data-act="pasteList">Paste a list</button><button class="btn" data-act="pasteStock">Paste stock counts</button>' + eyeBtn() + '</div>' : '<div class="muted small" style="align-self:flex-end">Only the owner can change prices and stock.</div>'}
       </div>
       <div class="card" style="padding:0;overflow:hidden"><table><thead><tr><th>Suit</th><th>Group</th><th class="right">Price</th>${owner ? '<th class="right">Cost</th><th class="right">Profit each</th>' : ''}<th class="right">In stock</th><th>Status</th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="${owner ? 8 : 5}" class="empty">No suits yet.</td></tr>`}</tbody></table></div>
@@ -913,6 +921,11 @@
         <label class="row"><input type="checkbox" data-bind="form.revealNeedsPassword" ${f.revealNeedsPassword ? 'checked' : ''}> Ask for the password before showing sales</label>
         <div><button class="btn primary" data-act="saveRules">Save</button></div></div></div>
 
+      <div class="card"><h2>Program updates</h2><div class="stack" style="margin-top:10px">
+        <div class="muted">Version <b>${esc((S.info && S.info.version) || '')}</b>. New versions are found automatically when the internet is on. You can also check now.</div>
+        ${updLine()}
+        <div class="row wrap"><button class="btn primary" data-act="checkUpdate">Check for updates</button>${S.upd && S.upd.status === 'ready' ? '<button class="btn success" data-act="installUpdate">Install the new version now</button>' : ''}</div></div></div>
+
       <div class="card"><h2>Backup</h2><div class="stack" style="margin-top:10px">
         <div class="muted">A copy of all data is saved on this computer every day and every time the program is closed. Turn on the nightly email copy in the Email card below for a copy that is safe even if this computer breaks.</div>
         <div class="row wrap"><button class="btn" data-act="backupNow">Back up now</button>
@@ -934,10 +947,6 @@
         <div class="muted">${S.recovery && S.recovery.exists ? 'A recovery code was made on ' + when(S.recovery.createdAt) + '. If the owner password is forgotten, choose <b>Forgot password?</b> on the log in screen and type the code.' : '<b style="color:var(--warn)">No recovery code yet.</b> Make one now and write it on paper. Without it, a forgotten password cannot be reset.'}</div>
         <div><button class="btn primary" data-act="recoveryAsk">${S.recovery && S.recovery.exists ? 'Make a new code' : 'Make a recovery code'}</button></div>
         <div class="muted small">A new code replaces the old one. Keep the paper away from the shop computer.</div></div></div>
-
-      <div class="card"><h2>Start fresh (before opening)</h2><div class="stack" style="margin-top:10px">
-        <div class="muted">Done testing? This removes all test bills, udhaar and profit figures so you begin from zero. Suits, prices and logins stay.</div>
-        ${S.settings.liveLocked ? '<div class="pill ok" style="align-self:flex-start">Real sales have started. Test clearing is switched off.</div>' : `<div class="row wrap"><button class="btn danger" data-act="clearBeforeAsk">Delete test bills before a date</button><button class="btn danger" data-act="clearTestAsk">Clear all test data</button><button class="btn primary" data-act="goLiveAsk">Start real sales (lock this)</button></div>`}</div></div>
 
       <div class="card"><h2>Change my password</h2><div class="row wrap" style="margin-top:10px">
         <div class="field-wrap"><label class="field" for="p-o">Current password</label>${pwInput('p-o', 'pw.old', S.pw.old, { label: 'Current password' })}</div>
@@ -1009,7 +1018,7 @@
         <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Switch</button></div></div></div></div>`;
     }
     if (m.type === 'sizepick') {
-      const order = ['S', 'M', 'L', 'XL'];
+      const order = ['S', 'M', 'L', 'XL', 'XXL'];
       const sibs = S.suits.filter((x) => x.base === m.base).sort((a, b) => order.indexOf(a.size) - order.indexOf(b.size));
       const inB = new Map(S.bill.lines.map((l) => [l.suitId, l.qty]));
       return `<div class="overlay"><div class="dialog"><h2>${esc(m.base)}: choose a size</h2><div class="stack">
@@ -1020,14 +1029,14 @@
         <div class="row"><button class="btn grow" data-act="modalCancel">Close</button></div></div></div></div>`;
     }
     if (m.type === 'sizes') {
-      const cats = ['Kurtas', 'Waistcoats'];
-      return `<div class="overlay"><div class="dialog"><h2>${m.edit ? 'Edit all sizes' : 'Add a kurta or waistcoat'}</h2><div class="stack">
-        <div><label class="field" for="m-base">Name (for example Kurta Black). Suits and shawls have no size, add them with Add a suit.</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}" ${m.edit ? 'disabled' : ''}></div>
+      const cats = ['Kurtas', 'Waistcoats', 'Dress Codes'];
+      return `<div class="overlay"><div class="dialog"><h2>${m.edit ? 'Edit all sizes' : 'Add with sizes'}</h2><div class="stack">
+        <div><label class="field" for="m-base">Name (for example Kurta Black or Dress Code Navy). Suits and shawls have no size, add them with Add a suit.</label><input id="m-base" type="text" data-bind="modal.base" data-autofocus="1" value="${esc(m.base)}" ${m.edit ? 'disabled' : ''}></div>
         ${m.edit ? '<div class="muted small">The price below is used for every size of this item. A size you leave empty keeps its current stock.</div>' : ''}<div class="chips">${cats.map((g) => `<button class="chip ${m.group === g ? 'on' : ''}" data-act="sizeCat" data-v="${g}">${g}</button>`).join('')}</div>
         <div class="row"><div class="field-wrap"><label class="field" for="m-sp">Selling price (Rs.)</label><input id="m-sp" type="text" inputmode="numeric" data-bind="modal.price" data-kind="digits" value="${esc(m.price)}"></div>
           <div class="field-wrap"><label class="field" for="m-sc">Cost price (Rs.)</label><input id="m-sc" type="${S.reveal.on ? 'text' : 'password'}" autocomplete="off" inputmode="numeric" data-bind="modal.cost" data-kind="digits" value="${esc(m.cost)}" placeholder="Optional"></div></div>
         <div class="muted small">How many pieces of each size are in the shop? Leave a size empty if you do not stock it.</div>
-        <div class="row">${['S', 'M', 'L', 'XL'].map((z) => `<div class="field-wrap"><label class="field" for="m-z${z}">${z}</label><input id="m-z${z}" type="text" inputmode="numeric" data-bind="modal.z${z}" data-kind="digits" value="${esc(m['z' + z])}"></div>`).join('')}</div>
+        <div class="row">${['S', 'M', 'L', 'XL', 'XXL'].map((z) => `<div class="field-wrap"><label class="field" for="m-z${z}">${z}</label><input id="m-z${z}" type="text" inputmode="numeric" data-bind="modal.z${z}" data-kind="digits" value="${esc(m['z' + z])}"></div>`).join('')}</div>
         <div class="err">${esc(m.error)}</div>
         <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Save sizes</button></div></div></div></div>`;
     }
@@ -1307,17 +1316,19 @@
     },
 
     deleteSuitAsk() { const m = S.modal; S.modal = { type: 'deleteSuit', id: m.id, name: m.name, base: m.base || '', all: false, value: '', error: '' }; S.showPw = {}; render(); },
+    async checkUpdate() { S.upd = { status: 'checking' }; render(); try { S.upd = await call('checkUpdate'); } catch (e) { S.upd = { status: 'error' }; } render(); },
+    async installUpdate() { await call('installUpdate'); },
     invToggle(el) { const b = el.dataset.base; S.prices.open[b] = !S.prices.open[b]; render(); },
     editAllSizes(el) {
       const base = el.dataset.base;
       const sibs = S.prices.all.filter((x) => x.base === base);
       if (!sibs.length) return;
       const f = sibs[0];
-      const m = { type: 'sizes', edit: true, base, group: f.group, price: String(f.price), cost: f.cost === null || f.cost === undefined ? '' : String(f.cost), zS: '', zM: '', zL: '', zXL: '', error: '' };
+      const m = { type: 'sizes', edit: true, base, group: f.group, price: String(f.price), cost: f.cost === null || f.cost === undefined ? '' : String(f.cost), zS: '', zM: '', zL: '', zXL: '', zXXL: '', error: '' };
       for (const x of sibs) m['z' + x.size] = x.stock === null || x.stock === undefined ? '' : String(x.stock);
       S.modal = m; render();
     },
-    addSizes() { S.modal = { type: 'sizes', base: '', group: 'Kurtas', price: '', cost: '', zS: '', zM: '', zL: '', zXL: '', error: '' }; render(); },
+    addSizes() { S.modal = { type: 'sizes', base: '', group: 'Kurtas', price: '', cost: '', zS: '', zM: '', zL: '', zXL: '', zXXL: '', error: '' }; render(); },
     sizeCat(el) { S.modal.group = el.dataset.v; render(); },
     profitMonth() { S.profit.day = ''; safe(async () => { if (S.reveal.on) await loadProfit(); render(); }); },
     async saveMail() {
@@ -1421,7 +1432,7 @@
           await doSwitched(u);
         } else if (m.type === 'sizes') {
           const sizes = {};
-          for (const z of ['S', 'M', 'L', 'XL']) if (m['z' + z] !== '' && m['z' + z] !== undefined) sizes[z] = Number(m['z' + z]);
+          for (const z of ['S', 'M', 'L', 'XL', 'XXL']) if (m['z' + z] !== '' && m['z' + z] !== undefined) sizes[z] = Number(m['z' + z]);
           const r = await call('saveSuitSizes', { base: m.base, group: m.group, price: m.price === '' ? 0 : Number(m.price), cost: m.cost === '' ? '' : Number(m.cost), sizes });
           S.modal = null;
           await reloadSuits();
