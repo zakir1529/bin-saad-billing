@@ -1025,3 +1025,32 @@ test('old JazzCash bills and settings are renamed once, amounts stay the same; X
   const names = ctx.svc.listSuits().filter((x) => x.base === 'Dress Coat Navy').map((x) => x.size);
   assert.deepEqual(names, ['S', 'M', 'XXL']);
 });
+
+test('PIN: works like a password for login and confirmations, is limited, and can reset the password', () => {
+  const ctx = setup();
+  ctx.svc.login('owner', 'owner1234');
+  assert.throws(() => ctx.svc.setPin('wrong', '482913'), /full password/);
+  assert.throws(() => ctx.svc.setPin('owner1234', '123456'), /too easy/);
+  assert.throws(() => ctx.svc.setPin('owner1234', '12ab56'), /6 digits/);
+  ctx.svc.setPin('owner1234', '482913');
+  assert.equal(ctx.svc.verifyPassword('482913'), true);
+  assert.equal(ctx.svc.verifyPassword('owner1234'), true);
+  assert.equal(ctx.svc.verifyPassword('111222'), false);
+  ctx.svc.logout();
+  assert.ok(ctx.svc.login('owner', '482913'));
+  assert.equal(ctx.svc.status().hasPin, true);
+  // five wrong PINs lock the PIN for a while, the password still works
+  for (let i = 0; i < 5; i++) ctx.svc.verifyPassword('999000');
+  assert.throws(() => ctx.svc.verifyPassword('482913'), /Too many wrong PIN/);
+  assert.equal(ctx.svc.verifyPassword('owner1234'), true);
+  // the PIN cannot be used where the full password is needed
+  assert.throws(() => ctx.svc.changePassword('482913', 'newpass99'), /current password is wrong/);
+  // reset with the PIN, before logging in
+  ctx.svc.logout();
+  assert.throws(() => ctx.svc.resetWithPin('owner', '000999', 'brandnew1'), /Wrong name or PIN/);
+  ctx.svc.resetWithPin('owner', '482913', 'brandnew1');
+  assert.ok(ctx.svc.login('owner', 'brandnew1'));
+  assert.throws(() => ctx.svc.login('owner', 'owner1234'), /Wrong/);
+  ctx.svc.removePin('brandnew1');
+  assert.equal(ctx.svc.status().hasPin, false);
+});

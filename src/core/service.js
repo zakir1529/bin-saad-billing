@@ -10,7 +10,7 @@ const PUBLIC_METHODS = [
   'listSuits', 'saveSuit', 'importSuits', 'createBill', 'getBill', 'searchBills', 'cancelBill',
   'dailyReport', 'monthlyReport', 'verifyPassword', 'listUsers', 'saveUser', 'changePassword', 'auditLog',
   'profitReport', 'listUdhaar', 'udhaarCustomer', 'receiveUdhaar',
-  'addStock', 'importStock', 'listStockLog', 'saveSuitSizes', 'listAccounts', 'switchAccount', 'saveEmailSettings', 'emailStatus', 'resetWithEmailCode', 'setBasePrice', 'deleteSuit', 'dashboard', 'ledger', 'rangeReport', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
+  'addStock', 'importStock', 'listStockLog', 'saveSuitSizes', 'listAccounts', 'switchAccount', 'saveEmailSettings', 'emailStatus', 'setPin', 'removePin', 'resetWithPin', 'resetWithEmailCode', 'setBasePrice', 'deleteSuit', 'dashboard', 'ledger', 'rangeReport', 'createRecoveryCode', 'recoveryInfo', 'resetWithRecovery',
 ];
 
 const SIZES = ['S', 'M', 'L', 'XL', 'XXL'];
@@ -148,7 +148,7 @@ class Service {
     return u;
   }
   _pub(u) {
-    return u ? { id: u.id, name: u.name, username: u.username, role: u.role } : null;
+    return u ? { id: u.id, name: u.name, username: u.username, role: u.role, hasPin: !!u.pin } : null;
   }
   // What a bill looks like to the person asking: staff never see cost or profit.
   _view(b) {
@@ -172,6 +172,7 @@ class Service {
       user: this._pub(this._user()),
       shopName: this.d.settings.shopName,
       hasRecovery: !!this.d.recovery,
+      hasPin: this.d.users.some((x) => x.active && x.pin),
       emailReady: this._emailReady(),
       emailTo: this._emailReady() ? maskEmail(this.d.settings.email.to) : '',
     };
@@ -190,15 +191,83 @@ class Service {
     });
   }
 
-  login(username, password) {
+  // A password, or the person's 6-digit PIN if they made one. Wrong PINs are limited so a PIN cannot be guessed by trying.
+  _secretOk(u, secret) {
+    if (checkPassword(u, secret)) return true;
+    if (u.pin && /^\d{6}$/.test(String(secret))) {
+      const now = this.now().getTime();
+      if (this._pinLockUntil && now < this._pinLockUntil) throw new UserError('Too many wrong PIN tries. Wait 5 minutes, or use the password.');
+      const given = Buffer.from(hashPassword(secret, u.pin.salt), 'hex');
+      const real = Buffer.from(u.pin.hash, 'hex');
+      if (given.length === real.length && crypto.timingSafeEqual(given, real)) { this._pinFails = 0; return true; }
+      this._pinFails = (this._pinFails || 0) + 1;
+      if (this._pinFails >= 5) { this._pinFails = 0; this._pinLockUntil = now + 5 * 60000; }
+    }
+    return false;
+  }
+
+  _findUser(username) {
     const wanted = String(username || '').trim().toLowerCase();
     let u = this.d.users.find((x) => x.active && x.username.toLowerCase() === wanted);
     if (!u && wanted) {
-      // the person's own name works too, when it is not shared with anyone else
       const byName = this.d.users.filter((x) => x.active && x.name.trim().toLowerCase() === wanted);
       if (byName.length === 1) u = byName[0];
     }
-    if (!u || !checkPassword(u, password)) throw new UserError('Wrong username or password.');
+    return u;
+  }
+
+  // The PIN is a second way in. It never replaces the password: changing the password or the PIN still needs the password.
+  setPin(password, pin) {
+    const u = this._requireUser();
+    if (!checkPassword(u, password)) throw new UserError('Type your full password to change the PIN.');
+    const p = String(pin || '');
+    if (!/^\d{6}$/.test(p)) throw new UserError('The PIN must be exactly 6 digits.');
+    if (/^(\d)\1{5}$/.test(p) || p === '123456' || p === '654321' || p === '012345') throw new UserError('That PIN is too easy to guess. Choose another.');
+    return this.store.run(() => {
+      const salt = crypto.randomBytes(16).toString('hex');
+      u.pin = { salt, hash: hashPassword(p, salt) };
+      this._audit(u, 'pin', 'PIN set');
+      return true;
+    });
+  }
+
+  removePin(password) {
+    const u = this._requireUser();
+    if (!checkPassword(u, password)) throw new UserError('Type your full password to remove the PIN.');
+    return this.store.run(() => { delete u.pin; this._audit(u, 'pin', 'PIN removed'); return true; });
+  }
+
+  // Works before logging in: the right PIN lets the person choose a new password.
+  resetWithPin(username, pin, newPassword) {
+    const u = this._findUser(username);
+    const now = this.now();
+    const rec = this.d.pinReset || {};
+    if (rec.lockedUntil && new Date(rec.lockedUntil) > now) {
+      const mins = Math.max(1, Math.ceil((new Date(rec.lockedUntil) - now) / 60000));
+      throw new UserError(`Too many wrong tries. Please wait ${mins} minute${mins === 1 ? '' : 's'} and try again.`);
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 4) throw new UserError('Password must be at least 4 characters.');
+    const given = Buffer.from(hashPassword(String(pin || ''), u && u.pin ? u.pin.salt : '00'), 'hex');
+    const real = u && u.pin ? Buffer.from(u.pin.hash, 'hex') : Buffer.alloc(32);
+    const good = !!(u && u.pin) && given.length === real.length && crypto.timingSafeEqual(given, real);
+    const ok = this.store.run((d) => {
+      if (!good) {
+        d.pinReset = { fails: (rec.fails || 0) + 1, lockedUntil: null };
+        if (d.pinReset.fails >= 5) d.pinReset = { fails: 0, lockedUntil: new Date(now.getTime() + 15 * 60000).toISOString() };
+        return false;
+      }
+      d.pinReset = { fails: 0, lockedUntil: null };
+      Object.assign(d.users.find((x) => x.id === u.id), newCredentials(newPassword));
+      this._audit(u, 'password-reset', 'Password reset with the PIN');
+      return true;
+    });
+    if (!ok) throw new UserError('Wrong name or PIN.');
+    return true;
+  }
+
+  login(username, password) {
+    const u = this._findUser(username);
+    if (!u || !this._secretOk(u, password)) throw new UserError('Wrong username or password.');
     this.userId = u.id;
     return this._pub(u);
   }
@@ -225,7 +294,7 @@ class Service {
     if (!free) {
       const now = this.now().getTime();
       if (this._switchLockUntil && now < this._switchLockUntil) throw new UserError('Too many wrong passwords. Please wait a minute.');
-      if (!checkPassword(t, password)) {
+      if (!this._secretOk(t, password)) {
         this._switchFails = (this._switchFails || 0) + 1;
         if (this._switchFails >= 5) { this._switchLockUntil = now + 60000; this._switchFails = 0; }
         throw new UserError('Wrong password.');
@@ -241,7 +310,7 @@ class Service {
   // Re-check the logged-in user's password (used for the eye button and other confirmations).
   verifyPassword(password) {
     const u = this._requireUser();
-    return checkPassword(u, password);
+    return this._secretOk(u, password);
   }
 
   changePassword(oldPassword, newPassword) {
@@ -489,7 +558,7 @@ class Service {
   // Delete an item that was never sold (a wrong or test item). Sold items can only be hidden, so old bills stay correct.
   deleteSuit(id, password, allSizes) {
     const u = this._requireOwner();
-    if (!checkPassword(u, password)) throw new UserError('The password is wrong.');
+    if (!this._secretOk(u, password)) throw new UserError('The password is wrong.');
     const one = this.d.suits.find((x) => x.id === id);
     if (!one) throw new UserError('That item was not found.');
     const rows = allSizes && one.base ? this.d.suits.filter((x) => x.base === one.base) : [one];

@@ -12,7 +12,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
 
 (async () => {
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+  const page = await browser.newPage({ viewport: { width: +(process.env.VW || 1366), height: +(process.env.VH || 768) } });
   const problems = [];
   page.on('pageerror', (e) => problems.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') problems.push('console: ' + m.text()); });
@@ -172,7 +172,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   check('cancelled count is 1', /Cancelled bills 1/.test(shownTxt));
   check("top bar today's sales shows 9,000", (await text('.top')).includes('Rs. 9,000'));
   await shot('10-sales-revealed');
-  await page.waitForFunction(() => !/Rs\. \d/.test(document.querySelector('.content').innerText), null, { timeout: 20000 });
+  await page.waitForFunction(() => !/Rs\. \d/.test(document.querySelector('.content').innerText), null, { timeout: 80000 });
   check('figures hide themselves again after a few seconds', true);
 
   // settings
@@ -268,7 +268,7 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   check('profit: Rs. 2,400 (sales 8,400 minus cost 6,000)', pTxt.includes('Rs. 2,400') && pTxt.includes('Rs. 8,400') && pTxt.includes('Rs. 6,000'), pTxt.slice(0, 500));
   check('profit: bills without a cost are reported as left out', pTxt.includes('2 bills are left out'), pTxt.slice(0, 600));
   await shot('18-profit-revealed');
-  await page.waitForFunction(() => !/Rs\. \d/.test(document.querySelector('.content').innerText), null, { timeout: 20000 });
+  await page.waitForFunction(() => !/Rs\. \d/.test(document.querySelector('.content').innerText), null, { timeout: 80000 });
   check('profit hides itself again', true);
 
   // staff login: no sales, no settings, discount limit enforced
@@ -341,6 +341,9 @@ const check = (name, ok, extra) => { results.push({ name, ok: !!ok, extra: ok ? 
   await shot('24-analytics-day');
   await nav('settings');
   check('settings no longer has the delete-test-bills or start-real-sales buttons', !(await text('.content')).includes('Delete test bills') && !(await text('.content')).includes('Start real sales') && !(await text('.content')).includes('Clear all test data'), '');
+  await page.fill('#n-pw', 'owner1234'); await page.fill('#n-a', '482913'); await page.fill('#n-b', '482913');
+  await page.click('[data-act=savePin]'); await page.waitForTimeout(500);
+  check('a 6-digit PIN can be saved from Settings', (await text('.toast')).includes('PIN saved') && (await text('.content')).includes('Remove PIN'), await text('.toast'));
   check('settings has a Program updates card with a check button', (await text('.content')).includes('Program updates') && (await page.locator('[data-act=checkUpdate]').count()) === 1, '');
   await page.click('[data-act=checkUpdate]'); await page.waitForTimeout(400);
   check('checking for updates says you have the newest version', (await text('.content')).includes('newest version'), '');

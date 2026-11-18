@@ -1,7 +1,7 @@
 'use strict';
 (function () {
   const M = window.Money; // the same money rules the program uses when it saves a bill
-  const REVEAL_MS = 15000; // how long hidden figures stay visible after the eye is clicked
+  const REVEAL_MS = 60000; // how long hidden figures stay visible after the eye is clicked
 
   const call = (method, ...args) => window.bridge.call(method, ...args);
   const fmt = M.fmt;
@@ -61,6 +61,7 @@
     dash: null, ledger: null, sizeSel: {}, dd: null, mail: null,
     sales: { day: todayKey(), month: monthKey(), day_data: null, month_data: null, from: todayKey(), to: todayKey() },
     reveal: { on: false, today: null, timer: null, unlocked: false },
+    pin: { pw: '', a: '', b: '' },
     showPw: {}, stock: { log: [] },
     form: null, newUser: { name: '', username: '', password: '' }, pw: { old: '', a: '', b: '' },
     printers: null, info: null, modal: null, toast: null, login: freshLogin(),
@@ -228,7 +229,7 @@
   // ---------- hidden figures (the eye button) ----------
   function hideReveal() {
     clearTimeout(S.reveal.timer);
-    S.reveal = { on: false, today: null, timer: null, unlocked: false };
+    S.reveal = { on: false, today: null, timer: null, unlocked: S.reveal.unlocked };
     S.sales.day_data = null;
     S.sales.month_data = null;
     S.profit.data = null;
@@ -246,7 +247,7 @@
   }
   async function toggleReveal() {
     if (S.reveal.on) return hideReveal();
-    // The password is asked every time, so figures never stay open for someone standing nearby.
+    // The password (or PIN) is asked once. After that the eye just shows and hides until the program is closed, locked or logged out.
     if (S.settings.revealNeedsPassword && !S.reveal.unlocked) { S.modal = { type: 'password', error: '' }; render(); return; }
     await doReveal();
   }
@@ -328,7 +329,7 @@
   // A password box with an eye button, so what is being typed can be checked.
   function pwInput(id, bind, value, opts = {}) {
     const show = !!S.showPw[id];
-    return `<div class="pw"><input id="${id}" type="${show ? 'text' : 'password'}" data-bind="${bind}" ${opts.enter ? `data-enter="${opts.enter}"` : ''} ${opts.autofocus ? 'data-autofocus="1"' : ''} aria-label="${esc(opts.label || 'Password')}" ${opts.placeholder ? `placeholder="${esc(opts.placeholder)}"` : ''} value="${esc(value)}" autocomplete="off">
+    return `<div class="pw"><input id="${id}" type="${show ? 'text' : 'password'}" data-bind="${bind}" ${opts.digits ? 'data-kind="digits" maxlength="6" inputmode="numeric" autocomplete="off"' : ''} ${opts.enter ? `data-enter="${opts.enter}"` : ''} ${opts.autofocus ? 'data-autofocus="1"' : ''} aria-label="${esc(opts.label || 'Password')}" ${opts.placeholder ? `placeholder="${esc(opts.placeholder)}"` : ''} value="${esc(value)}" autocomplete="off">
       <button type="button" class="pweye" data-act="pwtoggle" data-for="${id}" aria-label="${show ? 'Hide' : 'Show'} password" title="${show ? 'Hide' : 'Show'} password">${show ? EYE_OPEN : EYE_SLASH}</button></div>`;
   }
 
@@ -347,6 +348,20 @@
           <div class="err">${esc(L.error)}</div>
         </div></div></div>`;
     }
+    if (L.mode === 'forgot' && L.method === 'pin') {
+      return `<div class="login"><div class="box">
+        <h1>Reset with my PIN</h1><div class="sub">Type your name and your 6-digit PIN, then choose a new password. Your bills and data stay as they are.</div>
+        <div class="stack">
+          <div><label class="field" for="l-user">Your name or username</label><input id="l-user" type="text" data-bind="login.username" data-enter="resetPinPw" value="${esc(L.username)}" autocomplete="off" data-autofocus="1"></div>
+          <div><label class="field" for="l-pin">6-digit PIN</label>${pwInput('l-pin', 'login.code', L.code, { enter: 'resetPinPw', label: '6-digit PIN', digits: true })}</div>
+          <div><label class="field" for="l-npw">New password (at least 4 characters)</label>${pwInput('l-npw', 'login.password', L.password, { enter: 'resetPinPw', label: 'New password' })}</div>
+          <div><label class="field" for="l-npw2">Type the new password again</label>${pwInput('l-npw2', 'login.password2', L.password2, { enter: 'resetPinPw', label: 'New password again' })}</div>
+          <button class="btn primary big" data-act="resetPinPw" ${L.busy ? 'disabled' : ''}>Set the new password</button>
+          <div class="err">${esc(L.error)}</div>
+          <button class="link" data-act="paperMethod" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Use the paper recovery code instead</button>
+          <button class="link" data-act="backToLogin" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Back to log in</button>
+        </div></div></div>`;
+    }
     if (L.mode === 'forgot' && S.status.emailReady && L.method !== 'paper') {
       return `<div class="login"><div class="box">
         <h1>Forgot password</h1><div class="sub">${L.codeSent ? 'A 6-digit code was sent to ' + esc(S.status.emailTo) + '. It works once and expires in 10 minutes.' : 'We will email a 6-digit code to ' + esc(S.status.emailTo) + '.'}</div>
@@ -359,6 +374,7 @@
           : `<button class="btn primary big" data-act="sendEmailCode" ${L.busy ? 'disabled' : ''}>${L.busy ? 'Sending...' : 'Email me the code'}</button>`}
           <div class="err">${esc(L.error)}</div>
           <button class="link" data-act="paperMethod" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Use the paper recovery code instead</button>
+          ${S.status.hasPin ? '<button class="link" data-act="pinMethod" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Use my 6-digit PIN instead</button>' : ''}
           <button class="link" data-act="backToLogin" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Back to log in</button>
         </div></div></div>`;
     }
@@ -372,6 +388,7 @@
           <button class="btn primary big" data-act="resetPw" ${S.status.hasRecovery && !L.busy ? '' : 'disabled'}>Set the new password</button>
           <div class="err">${esc(L.error)}</div>
           ${S.status.emailReady ? '<button class="link" data-act="emailMethod" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Email me a code instead</button>' : ''}
+          ${S.status.hasPin ? '<button class="link" data-act="pinMethod" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Use my 6-digit PIN instead</button>' : ''}
           <button class="link" data-act="backToLogin" style="background:none;border:0;color:var(--accent);text-align:left;padding:0">Back to log in</button>
         </div></div></div>`;
     }
@@ -385,7 +402,7 @@
       <img class="loginlogo" src="logo.jpg" alt="${shop}"><div class="sub">Please log in</div>
       <div class="stack">
         <div><label class="field" for="l-user">Username or name</label><input id="l-user" type="text" data-bind="login.username" data-enter="login" value="${esc(L.username)}" placeholder="owner" autocomplete="off" data-autofocus="1"></div>
-        <div><label class="field" for="l-pw">Password</label>${pwInput('l-pw', 'login.password', L.password, { enter: 'login', label: 'Password' })}</div>
+        <div><label class="field" for="l-pw">Password or 6-digit PIN</label>${pwInput('l-pw', 'login.password', L.password, { enter: 'login', label: 'Password or PIN' })}</div>
         <button class="btn primary big" data-act="login">Log in</button>
         <div class="err">${esc(L.error)}</div>
         <button class="link" data-act="forgotGo" style="background:none;border:0;color:var(--accent);text-align:left;padding:0;font-size:13px">Forgot password?</button>
@@ -533,7 +550,7 @@
         const low = st !== null && st > 0 && st <= S.settings.lowStockAt;
         const stk = st === null ? '' : st === 0 ? '<span class="stk out">Out of stock</span>' : `<span class="stk ${low ? 'low' : ''}">${low ? 'Only ' + st + ' left' : st + ' in stock'}</span>`;
         return `<div class="tile cardtile ${inBill.has(s.id) ? 'in' : ''} ${st === 0 ? 'out' : ''}">
-          <span class="nm">${esc(s.name)}</span><span class="cat">${esc(s.category || '')}</span>
+          <span class="nm">${esc(s.name)}</span><span class="cat">${esc(s.group || '')}</span>
           <div class="stkline">${stk || '<span class="stk">Not counted</span>'}</div>
           <span class="pr num">${money(s.price)}</span>
           <button class="btn primary addbtn" data-act="tile" data-id="${s.id}" ${st === 0 ? 'disabled' : ''}>${st === 0 ? 'Out of stock' : '+ Add to Order'}</button>${inBill.has(s.id) ? `<span class="qty">x${inBill.get(s.id)}</span>` : ''}</div>`;
@@ -948,6 +965,14 @@
         <div><button class="btn primary" data-act="recoveryAsk">${S.recovery && S.recovery.exists ? 'Make a new code' : 'Make a recovery code'}</button></div>
         <div class="muted small">A new code replaces the old one. Keep the paper away from the shop computer.</div></div></div>
 
+      <div class="card"><h2>6-digit PIN</h2><div class="muted small" style="margin-top:4px">${S.user.hasPin ? 'A PIN is set. You can use it instead of the password to log in and to show the figures, and to reset a forgotten password from the login screen.' : 'Make a 6-digit PIN. It is quicker to type than the password. The password still works.'} Changing the PIN always needs your full password.</div>
+        <div class="row wrap" style="margin-top:10px">
+        <div class="field-wrap"><label class="field" for="n-pw">Your full password</label>${pwInput('n-pw', 'pin.pw', S.pin.pw, { label: 'Your full password' })}</div>
+        <div class="field-wrap"><label class="field" for="n-a">New 6-digit PIN</label>${pwInput('n-a', 'pin.a', S.pin.a, { label: 'New PIN', digits: true })}</div>
+        <div class="field-wrap"><label class="field" for="n-b">PIN again</label>${pwInput('n-b', 'pin.b', S.pin.b, { label: 'PIN again', digits: true })}</div>
+        <button class="btn primary" style="align-self:flex-end" data-act="savePin">${S.user.hasPin ? 'Change PIN' : 'Save PIN'}</button>
+        ${S.user.hasPin ? '<button class="btn danger" style="align-self:flex-end" data-act="removePinAsk">Remove PIN</button>' : ''}</div></div>
+
       <div class="card"><h2>Change my password</h2><div class="row wrap" style="margin-top:10px">
         <div class="field-wrap"><label class="field" for="p-o">Current password</label>${pwInput('p-o', 'pw.old', S.pw.old, { label: 'Current password' })}</div>
         <div class="field-wrap"><label class="field" for="p-a">New password</label>${pwInput('p-a', 'pw.a', S.pw.a, { label: 'New password' })}</div>
@@ -976,9 +1001,9 @@
     }
     if (!m) return '';
     if (m.type === 'password') {
-      return `<div class="overlay"><div class="dialog"><h2>Enter your password</h2><div class="stack">
-        <div class="muted small">To show sales, profit and cost, please confirm it is you. You will not be asked again until the program is closed and opened again.</div>
-        ${pwInput('m-pw', 'modal.value', m.value || '', { enter: 'modalOk', autofocus: true, label: 'Password' })}
+      return `<div class="overlay"><div class="dialog"><h2>Enter your password or PIN</h2><div class="stack">
+        <div class="muted small">To show sales, profit and cost, please confirm it is you. You will not be asked again until the program is closed, locked or logged out.</div>
+        ${pwInput('m-pw', 'modal.value', m.value || '', { enter: 'modalOk', autofocus: true, label: 'Password or PIN' })}
         <div class="err">${esc(m.error)}</div>
         <div class="row"><button class="btn" data-act="modalCancel">Cancel</button><button class="btn primary grow" data-act="modalOk">Show</button></div></div></div></div>`;
     }
@@ -1186,6 +1211,7 @@
       } catch (e) { L.error = e.message; render(); }
     },
     forgotGo() { S.login = { ...freshLogin(), mode: 'forgot' }; S.showPw = {}; render(); },
+    pinMethod() { S.login.method = 'pin'; S.login.error = ''; S.login.code = ''; S.login.password = ''; S.login.password2 = ''; render(); },
     paperMethod() { S.login.method = 'paper'; S.login.error = ''; S.login.code = ''; render(); },
     emailMethod() { S.login.method = 'email'; S.login.error = ''; S.login.code = ''; render(); },
     async sendEmailCode() {
@@ -1194,6 +1220,37 @@
       L.busy = true; L.error = ''; render();
       try { await call('requestEmailCode'); L.codeSent = true; L.code = ''; } catch (e) { L.error = e.message; }
       L.busy = false; render();
+    },
+    async resetPinPw() {
+      const L = S.login;
+      if (L.busy) return;
+      if (!/^\d{6}$/.test(L.code || '')) { L.error = 'The PIN is 6 digits.'; render(); return; }
+      if (L.password !== L.password2) { L.error = 'The two new passwords are not the same.'; render(); return; }
+      L.busy = true; L.error = ''; render();
+      try {
+        await call('resetWithPin', L.username, L.code, L.password);
+        S.login = freshLogin(); S.showPw = {};
+        render(); toast('Password changed. Log in with the new password.');
+        return;
+      } catch (e) { L.error = e.message; L.busy = false; }
+      render();
+    },
+    async savePin() {
+      const P = S.pin;
+      if (!/^\d{6}$/.test(P.a || '')) { toast('The PIN must be exactly 6 digits.'); return; }
+      if (P.a !== P.b) { toast('The two PINs are not the same.'); return; }
+      await call('setPin', P.pw, P.a);
+      S.pin = { pw: '', a: '', b: '' };
+      S.user = { ...S.user, hasPin: true };
+      toast('PIN saved. You can now log in or confirm with the PIN or the password.');
+      render();
+    },
+    async removePinAsk() {
+      await call('removePin', S.pin.pw);
+      S.pin = { pw: '', a: '', b: '' };
+      S.user = { ...S.user, hasPin: false };
+      toast('PIN removed.');
+      render();
     },
     async resetEmailPw() {
       const L = S.login;

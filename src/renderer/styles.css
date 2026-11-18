@@ -407,3 +407,15 @@ tr.click.sel td:first-child { box-shadow: inset 4px 0 0 #c9a35b; }
 .billcard::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: linear-gradient(90deg, #f6dc92, #c9a35b, #7a5a1e); }
 .billcard h2 { color: #f3d98e; font-size: 19px; }
 .billcard .sum:last-of-type { border-top: 1px dashed #5a4a22; padding-top: 10px; margin-top: 6px; color: #f3d98e; }
+
+/* ---- checkout cards: every card the same shape, nothing spills over ---- */
+.picker .tiles { grid-auto-rows: max-content; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); align-items: stretch; gap: 14px; padding: 4px; }
+.tile.cardtile { height: auto; min-height: 0; overflow: visible; justify-content: flex-start; gap: 9px; padding: 16px; border-radius: 16px; box-shadow: 0 8px 22px rgba(0, 0, 0, .3); }
+.tile.cardtile .nm { padding-right: 34px; min-height: 2.5em; display: block; }
+.tile.cardtile .cat { min-height: 14px; display: block; }
+.tile.cardtile .stkline { min-height: 42px; display: flex; align-items: center; }
+.tile.cardtile .pr { margin-top: auto; font-size: 19px; font-weight: 800; color: #f3d98e; }
+.tile.cardtile .addbtn { width: 100%; justify-content: center; margin: 0; }
+.tile.cardtile .dd { width: 100%; }
+.tile.cardtile .ddbtn { min-height: 42px; }
+.tile.cardtile:has(.ddlist) { z-index: 30; }

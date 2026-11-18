@@ -17,7 +17,7 @@ let service = null;
 let lastBackup = { ok: null, at: null, error: '', target: '' };
 let backupTimer = null;
 
-const MUTATING = new Set(['createBill', 'cancelBill', 'saveSuit', 'importSuits', 'saveUser', 'saveSettings', 'setupOwner', 'changePassword', 'receiveUdhaar', 'addStock', 'importStock', 'createRecoveryCode', 'resetWithRecovery', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'setBasePrice', 'deleteSuit', 'saveEmailSettings', 'resetWithEmailCode', 'switchAccount']);
+const MUTATING = new Set(['createBill', 'cancelBill', 'saveSuit', 'importSuits', 'saveUser', 'saveSettings', 'setupOwner', 'changePassword', 'setPin', 'removePin', 'resetWithPin', 'receiveUdhaar', 'addStock', 'importStock', 'createRecoveryCode', 'resetWithRecovery', 'clearTestData', 'clearTestBefore', 'startRealSales', 'saveSuitSizes', 'setBasePrice', 'deleteSuit', 'saveEmailSettings', 'resetWithEmailCode', 'switchAccount']);
 
 // ---------- a small log file, and nothing is allowed to crash the program ----------
 function logLine(text) {
@@ -484,6 +484,7 @@ function registerIpc() {
       if (MUTATING.has(method)) scheduleBackup(4000);
       if (method === 'changePassword') notifyPasswordChange('from Settings');
       if (method === 'resetWithRecovery') notifyPasswordChange('with the paper recovery code');
+      if (method === 'resetWithPin') notifyPasswordChange('with the 6-digit PIN');
       if (method === 'resetWithEmailCode') notifyPasswordChange('with an emailed code');
       return { ok: true, value };
     } catch (e) {
